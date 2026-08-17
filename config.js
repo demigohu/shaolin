@@ -28,14 +28,16 @@ if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 const defaultModes = {
   scalp: {
     label: "Scalping",
-    timeframes: ["5m", "15m", "1h"],
+    timeframes: ["1m", "5m", "15m", "1h"],
+    mtfStyle: "intraday",
     screeningIntervalMin: 10,
     managementIntervalMin: 3,
     setupMaxAgeMin: 90,
     entryZonePips: 3,
+    maxSlPips: 40,
     minConfidence: 65,
     minRrRatio: 1.2,
-    combinedTimeframe: "15m",
+    combinedTimeframe: "5m",
     partialTp: [{ pct: 50, atRr: 1.0 }, { pct: 50, atRr: 2.0 }],
     sessions: ["london", "new_york", "overlap"],
   },
@@ -77,7 +79,7 @@ export const config = {
   },
   broker: {
     name: u.brokerName ?? u.broker?.name ?? "HFM",
-    pipSize: u.pipSize ?? u.broker?.pipSize ?? 0.01,
+    pipSize: u.pipSize ?? u.broker?.pipSize ?? 0.1,
     digits: u.digits ?? u.broker?.digits ?? 2,
     priceOffset: u.priceOffset ?? u.broker?.priceOffset ?? 0,
   },

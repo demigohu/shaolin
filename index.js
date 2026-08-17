@@ -72,7 +72,19 @@ export async function runScreeningCycle({ silent = false } = {}) {
 
     expireStaleSetups(mode.setupMaxAgeMin);
 
-    const goal = `Run XAUUSD screening for ${mode.label}. Analyze MTF + combined TA. If conditions meet min confidence ${mode.minConfidence}% and RR ${mode.minRrRatio}, call propose_setup once. Otherwise report WATCH or AVOID with reason.`;
+    const open = getOpenSetups();
+    if (open.length > 0) {
+      const msg = `Open setup(s) active (${open.length}) — skipping new screening. Management monitors TP/SL every ${mode.managementIntervalMin}m.`;
+      appendScreeningDecision({ action: "WATCH", summary: msg, reason: "open_setup_active" });
+      log("screen", msg);
+      if (!silent) {
+        await sendMessage(`🥋 ${msg}\n\n${getSetupsSummary()}`);
+      }
+      return msg;
+    }
+
+    const maxSl = mode.maxSlPips ?? 40;
+    const goal = `Run XAUUSD ${mode.label} screening. Intraday TFs: ${mode.timeframes.join(", ")}. Analyze scalp MTF + combined TA on ${mode.combinedTimeframe}. If SETUP: tight SL max ${maxSl} pips, min confidence ${mode.minConfidence}%, min RR ${mode.minRrRatio}. Do NOT use Daily/Weekly Bollinger as SL. Otherwise WATCH or AVOID.`;
 
     const toolStarts = new Map();
     const { content, messages } = await agentLoop(

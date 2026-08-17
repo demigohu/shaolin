@@ -8,21 +8,23 @@
   },
   "broker": {
     "name": "HFM",
-    "pipSize": 0.01,
+    "pipSize": 0.1,
     "digits": 2,
     "priceOffset": 0.0
   },
   "modes": {
     "scalp": {
       "label": "Scalping",
-      "timeframes": ["5m", "15m", "1h"],
+      "timeframes": ["1m", "5m", "15m", "1h"],
+      "mtfStyle": "intraday",
       "screeningIntervalMin": 10,
       "managementIntervalMin": 3,
       "setupMaxAgeMin": 90,
       "entryZonePips": 3,
+      "maxSlPips": 40,
       "minConfidence": 65,
       "minRrRatio": 1.2,
-      "combinedTimeframe": "15m",
+      "combinedTimeframe": "5m",
       "partialTp": [
         { "pct": 50, "atRr": 1.0 },
         { "pct": 50, "atRr": 2.0 }

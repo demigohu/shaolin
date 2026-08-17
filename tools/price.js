@@ -9,15 +9,16 @@ export function toBrokerPrice(oandaPrice) {
 }
 
 export function toPips(distance) {
-  const pip = config.broker.pipSize || 0.01;
+  const pip = config.broker.pipSize || 0.1;
   if (!Number.isFinite(distance) || pip <= 0) return 0;
   return Math.round(distance / pip);
 }
 
 export function roundToPips(price) {
-  const pip = config.broker.pipSize || 0.01;
+  const pip = config.broker.pipSize || 0.1;
+  const digits = config.broker.digits ?? 2;
   if (!Number.isFinite(price)) return 0;
-  return Math.round(price / pip) * pip;
+  return Number((Math.round(price / pip) * pip).toFixed(digits));
 }
 
 export function computeTpLevels(side, entry, sl, partialTp) {

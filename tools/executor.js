@@ -63,7 +63,21 @@ const toolMap = {
       const extra = result.reason === "thesis_cooldown"
         ? { recall: recallForThesis({ side: args.side, entry: args.entry, sl: args.sl, strategy_id: strategyId, mode: mode.id }) }
         : {};
-      return { success: false, skipped: true, reason: result.reason, existing: result.existing, thesis_id: result.thesis_id, ...extra };
+      return {
+        success: false,
+        skipped: true,
+        reason: result.reason,
+        existing: result.existing,
+        thesis_id: result.thesis_id,
+        sl_pips: result.sl_pips,
+        max_sl_pips: result.max_sl_pips,
+        message: result.reason === "open_setup_exists"
+          ? `Open setup ${result.existing} still active — management handles it`
+          : result.reason === "sl_too_wide"
+            ? `SL ${result.sl_pips} pips exceeds max ${result.max_sl_pips} for ${mode.id}`
+            : undefined,
+        ...extra,
+      };
     }
     return { success: true, setup: result.setup };
   },

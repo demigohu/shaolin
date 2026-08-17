@@ -45,19 +45,38 @@ export function findActiveSetups() {
   );
 }
 
+export function findOpenSetupSameSide(side, modeId = null) {
+  return findActiveSetups().find(
+    (s) => s.side === side && (!modeId || s.mode === modeId),
+  ) || null;
+}
+
 export function findDuplicateThesis(candidate) {
   const active = findActiveSetups();
-  const fp = thesisFingerprint(candidate);
   const mode = getActiveMode();
   const zonePips = mode.entryZonePips ?? 3;
-  const pip = config.broker.pipSize || 0.01;
+  const pip = config.broker.pipSize || 0.1;
   const zone = zonePips * pip;
 
+  // Same side + similar entry zone → treat as duplicate even if SL differs
+  for (const s of active) {
+    if (s.side !== candidate.side) continue;
+    if (modeIdOrAny(s.mode, candidate.mode) && Math.abs(s.entry - candidate.entry) <= zone * 3) {
+      return s;
+    }
+  }
+
+  const fp = thesisFingerprint(candidate);
   for (const s of active) {
     if (thesisFingerprint(s) !== fp) continue;
     if (Math.abs(s.entry - candidate.entry) <= zone) return s;
   }
   return null;
+}
+
+function modeIdOrAny(a, b) {
+  if (!a || !b) return true;
+  return a === b;
 }
 
 export function countSetupsToday() {
@@ -94,6 +113,17 @@ export function createSetup(input) {
   const duplicate = findDuplicateThesis(candidate);
   if (duplicate) {
     return { skipped: true, reason: "duplicate_thesis", existing: duplicate.id };
+  }
+
+  const sameSideOpen = findOpenSetupSameSide(side, mode.id);
+  if (sameSideOpen) {
+    return { skipped: true, reason: "open_setup_exists", existing: sameSideOpen.id };
+  }
+
+  const slPips = toPips(Math.abs(entry - sl));
+  const maxSl = mode.maxSlPips;
+  if (maxSl != null && slPips > maxSl) {
+    return { skipped: true, reason: "sl_too_wide", sl_pips: slPips, max_sl_pips: maxSl };
   }
 
   if (isThesisOnCooldown(candidate)) {

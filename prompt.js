@@ -34,16 +34,24 @@ Active strategy: ${strategy.name} (${strategy.id})
 `.trim();
 
   if (agentType === "SCREENER") {
+    const maxSl = mode.maxSlPips;
+    const slRule = maxSl != null
+      ? `- Scalp SL max ${maxSl} pips (${(maxSl * broker.pipSize).toFixed(1)} price). Use 1m/5m structure — NOT Daily/Weekly Bollinger as SL.`
+      : "";
+
     return `${shared}
 
 ROLE: SCREENER — analyze XAUUSD and produce at most one setup per cycle.
 
+OPEN SETUPS (if any listed below — do NOT call propose_setup; management handles them):
+${getSetupsSummary()}
+
 WORKFLOW:
-1. Call get_xauusd_mtf and get_xauusd_combined (and get_gold_news if macro risk).
+1. Call get_xauusd_mtf (intraday: ${mode.timeframes.join(" → ")}) and get_xauusd_combined on ${mode.combinedTimeframe}.
 2. Synthesize bias, key levels, and whether conditions meet min confidence/RR.
-3. If actionable SETUP: call propose_setup with side, entry, sl, confidence, reason, thesis_id, risks.
-   Respect thesis memory cooldowns and prioritize higher-weighted signals.
-4. If not ready: respond with action WATCH or AVOID — no propose_setup.
+3. If SETUP and NO open setups: call propose_setup once with tight scalp SL.
+4. If open setup exists OR not ready: WATCH or AVOID — never propose_setup.
+${slRule}
 
 Session allowed: ${isSessionAllowed(mode) ? "yes" : "no — prefer AVOID/WATCH"}
 
