@@ -3,7 +3,7 @@ import { createSetup, getOpenSetups } from "../setups.js";
 import { getRecentScreeningDecisions } from "../screening-log.js";
 import { getActiveMode, getCurrentSession } from "../modes.js";
 import { config } from "../config.js";
-import { isStrategyApproved } from "../strategies.js";
+import { isStrategyApproved, setActiveStrategy, listStrategies, formatStrategiesList, backtestMcpStrategy, strategyIdFor, getActiveStrategy } from "../strategies.js";
 import { recallForThesis } from "../setup-memory.js";
 import {
   stageSignals,
@@ -34,8 +34,29 @@ const toolMap = {
   get_recent_screening: (args) => ({ decisions: getRecentScreeningDecisions(args?.limit ?? 10) }),
   backtest_strategy: (args) => backtest.runBacktest(args),
   compare_strategies: (args) => backtest.compareStrategies(args),
+  list_strategies: () => ({
+    active: getActiveStrategy().id,
+    strategies: listStrategies(),
+    summary: formatStrategiesList(),
+  }),
+  backtest_mcp_strategy: (args) => backtestMcpStrategy(args.strategy, {
+    period: args.period,
+    interval: args.interval,
+    activate: args.activate === true,
+  }),
+  activate_strategy: (args) => {
+    try {
+      const id = args.strategy_id
+        || (args.mcp_strategy ? strategyIdFor(args.mcp_strategy) : null);
+      if (!id) return { error: "strategy_id or mcp_strategy required" };
+      const s = setActiveStrategy(id);
+      return { success: true, active: s.id, mcpStrategy: s.mcpStrategy, name: s.name };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
   propose_setup: (args) => {
-    const strategyId = args.strategy_id || config.strategy.activeStrategyId;
+    const strategyId = args.strategy_id || getActiveStrategy().id;
     if (config.strategy.requireBacktestApproval && !isStrategyApproved(strategyId)) {
       return {
         success: false,

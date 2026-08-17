@@ -42,6 +42,10 @@ node cli.js backtest   # compare MCP strategies
 /weights         Signal weights
 /memory          Thesis history
 /mode scalp      Switch mode (scalp|day|swing)
+/strategies      List strategies
+/backtest supertrend     Backtest strategy
+/backtest supertrend activate   Backtest + activate
+/use supertrend  Activate strategy for screening
 /help
 ```
 

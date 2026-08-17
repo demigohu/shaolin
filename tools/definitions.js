@@ -119,6 +119,47 @@ export const tools = [
   {
     type: "function",
     function: {
+      name: "list_strategies",
+      description: "List registered strategies with backtest status and which is active.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "backtest_mcp_strategy",
+      description: "Backtest an MCP strategy on XAUUSD. Optionally activate if approved.",
+      parameters: {
+        type: "object",
+        properties: {
+          strategy: { type: "string", enum: ["rsi", "bollinger", "macd", "ema_cross", "supertrend", "donchian", "rsi_pullback", "keltner_breakout", "triple_ema"] },
+          period: { type: "string", enum: ["1mo", "3mo", "6mo", "1y", "2y"] },
+          interval: { type: "string", enum: ["1d", "1h"] },
+          activate: { type: "boolean", description: "Set true to activate for screening if backtest passes" },
+        },
+        required: ["strategy"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "activate_strategy",
+      description: "Switch active screening strategy. Must be backtest-approved if gate enabled.",
+      parameters: {
+        type: "object",
+        properties: {
+          strategy_id: { type: "string", description: "e.g. scalp_supertrend" },
+          mcp_strategy: { type: "string", description: "Shorthand: supertrend, rsi, etc." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_recent_screening",
       description: "Recent screening decision log.",
       parameters: {

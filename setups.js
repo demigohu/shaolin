@@ -5,6 +5,7 @@ import { getActiveMode } from "./modes.js";
 import { computeTpLevels, computeRrRatio, roundToPips, toPips } from "./tools/price.js";
 import { config } from "./config.js";
 import { isThesisOnCooldown } from "./setup-memory.js";
+import { getActiveStrategy } from "./strategies.js";
 
 const SETUPS_FILE = repoPath("setups.json");
 
@@ -106,7 +107,7 @@ export function createSetup(input) {
     entry,
     sl,
     tp: tpFinal,
-    strategy_id: input.strategy_id || config.strategy.activeStrategyId,
+    strategy_id: input.strategy_id || getActiveStrategy().id,
     mode: mode.id,
   };
 

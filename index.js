@@ -21,7 +21,8 @@ import { sendMessage, startPolling, isEnabled as telegramEnabled, getTelegramSta
 import { closeMcp } from "./tools/mcp-client.js";
 import { getXauusdPrice } from "./tools/market.js";
 import { toPips } from "./tools/price.js";
-import { isStrategyApproved, getActiveStrategy, ensureStrategyApproved } from "./strategies.js";
+import { isStrategyApproved, getActiveStrategy, ensureStrategyApproved, backtestMcpStrategy, formatStrategiesList, setActiveStrategy, MCP_STRATEGIES, strategyIdFor } from "./strategies.js";
+import { compareStrategies } from "./tools/backtest.js";
 import { formatAgentStatus } from "./status.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { getSetupMemorySummary } from "./setup-memory.js";
@@ -289,6 +290,70 @@ async function telegramHandler(msg) {
     }
     return;
   }
+  if (text === "/strategies") {
+    await reply(`📋 Strategies\n${formatStrategiesList()}\n\nAvailable MCP: ${MCP_STRATEGIES.join(", ")}`);
+    return;
+  }
+  if (text.startsWith("/backtest")) {
+    const parts = text.split(/\s+/).slice(1);
+    const mcp = parts[0];
+    const activate = parts.includes("activate");
+
+    if (!mcp || mcp === "compare") {
+      await reply("⏳ Comparing all strategies (~2-3 min)...");
+      try {
+        const result = await compareStrategies({ period: "1y", interval: "1h" });
+        const top = result?.rankings?.slice?.(0, 5) || result?.strategies?.slice?.(0, 5) || result;
+        await reply(`📊 Compare results (top):\n${JSON.stringify(top, null, 2).slice(0, 3500)}`);
+      } catch (error) {
+        await reply(`❌ Compare failed: ${error.message}`);
+      }
+      return;
+    }
+
+    if (!MCP_STRATEGIES.includes(mcp)) {
+      await reply(`Unknown strategy: ${mcp}\nAvailable: ${MCP_STRATEGIES.join(", ")}`);
+      return;
+    }
+
+    await reply(`⏳ Backtesting ${mcp} on XAUUSD (~1-2 min)...`);
+    try {
+      const out = await backtestMcpStrategy(mcp, { activate });
+      if (out.error) {
+        await reply(`❌ ${out.error}`);
+        return;
+      }
+      await reply([out.summary, "", out.message].filter(Boolean).join("\n"));
+    } catch (error) {
+      await reply(`❌ Backtest failed: ${error.message}`);
+    }
+    return;
+  }
+  if (text.startsWith("/use ")) {
+    const mcp = text.split(/\s+/)[1];
+    if (!mcp) {
+      await reply("Usage: /use supertrend");
+      return;
+    }
+    if (!MCP_STRATEGIES.includes(mcp)) {
+      await reply(`Unknown: ${mcp}. Available: ${MCP_STRATEGIES.join(", ")}`);
+      return;
+    }
+    const id = strategyIdFor(mcp);
+    try {
+      if (isStrategyApproved(id)) {
+        const s = setActiveStrategy(id);
+        await reply(`✅ Active strategy: ${s.id} (${s.mcpStrategy})`);
+      } else {
+        await reply(`Belum approved. Running backtest + activate...`);
+        const out = await backtestMcpStrategy(mcp, { activate: true });
+        await reply(out.error ? `❌ ${out.error}` : [out.summary, "", out.message].filter(Boolean).join("\n"));
+      }
+    } catch (error) {
+      await reply(`❌ ${error.message}`);
+    }
+    return;
+  }
   if (text === "/manage") {
     await reply("Running management cycle...");
     const result = await runManagementCycle();
@@ -324,7 +389,11 @@ async function telegramHandler(msg) {
       "/setups — open setups only",
       "/cancel all — cancel all open setups",
       "/cancel <setup-id> — cancel one setup",
-      "/weights — signal weight summary",
+      "/strategies — list backtest strategies",
+      "/backtest supertrend — run backtest",
+      "/backtest supertrend activate — backtest + activate if OK",
+      "/backtest compare — compare all 9 strategies",
+      "/use supertrend — activate strategy (backtest first if needed)",
       "/memory — thesis history",
       "/mode scalp|day|swing — switch mode",
     ].join("\n"));
