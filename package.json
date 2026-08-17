@@ -1,0 +1,30 @@
+{
+  "name": "shaolin",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "XAUUSD forex screening & setup management agent (TradingView MCP + LLM)",
+  "main": "index.js",
+  "bin": {
+    "shaolin": "cli.js"
+  },
+  "scripts": {
+    "setup": "node setup.js && node scripts/setup-mcp.js",
+    "postinstall": "node scripts/setup-mcp.js --check",
+    "mcp:install": "node scripts/setup-mcp.js",
+    "mcp:smoke": "node scripts/smoke-mcp.js",
+    "dev": "DRY_RUN=true node index.js",
+    "start": "node index.js",
+    "test": "npm run test:syntax",
+    "test:syntax": "find . -path ./node_modules -prune -o -path ./mcp -prune -o -name '*.js' -exec node --check {} \\;"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.14.0",
+    "dotenv": "^17.3.1",
+    "jsonrepair": "^3.13.3",
+    "node-cron": "^3.0.3",
+    "openai": "^4.73.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

@@ -1,0 +1,15 @@
+node_modules/
+mcp/.venv/
+__pycache__/
+*.pyc
+.env
+.env.raw
+.envrypt
+user-config.json
+setups.json
+screening-log.json
+lessons.json
+strategies.json
+setup-memory.json
+logs/
+.DS_Store

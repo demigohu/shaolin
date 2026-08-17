@@ -1,0 +1,88 @@
+{
+  "activeMode": "scalp",
+  "market": {
+    "dataSymbol": "XAUUSD",
+    "dataExchange": "OANDA",
+    "displayName": "XAUUSD",
+    "yahooSymbol": "GC=F"
+  },
+  "broker": {
+    "name": "HFM",
+    "pipSize": 0.01,
+    "digits": 2,
+    "priceOffset": 0.0
+  },
+  "modes": {
+    "scalp": {
+      "label": "Scalping",
+      "timeframes": ["5m", "15m", "1h"],
+      "screeningIntervalMin": 10,
+      "managementIntervalMin": 3,
+      "setupMaxAgeMin": 90,
+      "entryZonePips": 3,
+      "minConfidence": 65,
+      "minRrRatio": 1.2,
+      "combinedTimeframe": "15m",
+      "partialTp": [
+        { "pct": 50, "atRr": 1.0 },
+        { "pct": 50, "atRr": 2.0 }
+      ],
+      "sessions": ["london", "new_york", "overlap"]
+    },
+    "day": {
+      "label": "Day Trading",
+      "timeframes": ["15m", "1h", "4h"],
+      "screeningIntervalMin": 30,
+      "managementIntervalMin": 5,
+      "setupMaxAgeMin": 480,
+      "entryZonePips": 5,
+      "minConfidence": 65,
+      "minRrRatio": 1.5,
+      "combinedTimeframe": "1h",
+      "partialTp": [
+        { "pct": 40, "atRr": 1.0 },
+        { "pct": 30, "atRr": 1.5 },
+        { "pct": 30, "atRr": 2.5 }
+      ],
+      "sessions": ["london", "new_york"]
+    },
+    "swing": {
+      "label": "Swing / Week",
+      "timeframes": ["4h", "1D", "1W"],
+      "screeningIntervalMin": 240,
+      "managementIntervalMin": 30,
+      "setupMaxAgeMin": 7200,
+      "entryZonePips": 15,
+      "minConfidence": 70,
+      "minRrRatio": 2.0,
+      "combinedTimeframe": "4h",
+      "partialTp": [
+        { "pct": 33, "atRr": 1.0 },
+        { "pct": 33, "atRr": 2.0 },
+        { "pct": 34, "atRr": 3.0 }
+      ],
+      "sessions": ["any"]
+    }
+  },
+  "screening": {
+    "maxSetupsPerDay": 8,
+    "newsBlackoutMinutes": 0,
+    "nearTpSlAlertPct": 80
+  },
+  "management": {
+    "breakevenAlertAfterTp1": true
+  },
+  "llm": {
+    "temperature": 0.35,
+    "maxTokens": 4096,
+    "maxSteps": 15,
+    "screeningModel": "openrouter/healer-alpha",
+    "managementModel": "openrouter/healer-alpha",
+    "generalModel": "openrouter/healer-alpha"
+  },
+  "strategy": {
+    "requireBacktestApproval": false,
+    "activeStrategyId": "scalp_mtf_default"
+  },
+  "telegramChatId": null
+}
