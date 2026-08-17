@@ -65,6 +65,10 @@ export const tools = [
           reason: { type: "string" },
           thesis_id: { type: "string", description: "Short thesis identifier for dedup" },
           risks: { type: "array", items: { type: "string" } },
+          screening_snapshot: {
+            type: "object",
+            description: "Optional screening signals (mtf_net_score, rsi, news_sentiment_score, etc.)",
+          },
         },
         required: ["side", "entry", "sl", "confidence", "reason"],
         additionalProperties: false,

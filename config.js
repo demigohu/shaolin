@@ -1,7 +1,19 @@
+import "dotenv/config";
 import fs from "fs";
 import { REPO_ROOT, repoPath } from "./repo-root.js";
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
+
+/** Custom RPC (non-OpenRouter): prefer LLM_MODEL from .env over stale openrouter/* in user-config. */
+function resolveLlmModel(configured) {
+  const envModel = process.env.LLM_MODEL?.trim() || null;
+  const baseUrl = process.env.LLM_BASE_URL || "";
+  const customEndpoint = baseUrl && !baseUrl.includes("openrouter.ai");
+  if (customEndpoint && envModel && (!configured || String(configured).startsWith("openrouter/"))) {
+    return envModel;
+  }
+  return configured ?? envModel ?? "openrouter/healer-alpha";
+}
 
 const u = fs.existsSync(USER_CONFIG_PATH)
   ? JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"))
@@ -79,16 +91,34 @@ export const config = {
     breakevenAlertAfterTp1: u.breakevenAlertAfterTp1 ?? true,
   },
   llm: {
-    temperature: u.temperature ?? 0.35,
-    maxTokens: u.maxTokens ?? 4096,
-    maxSteps: u.maxSteps ?? 15,
-    screeningModel: u.screeningModel ?? u.llm?.screeningModel ?? "openrouter/healer-alpha",
-    managementModel: u.managementModel ?? u.llm?.managementModel ?? "openrouter/healer-alpha",
-    generalModel: u.generalModel ?? u.llm?.generalModel ?? "openrouter/healer-alpha",
+    temperature: u.temperature ?? u.llm?.temperature ?? 0.35,
+    maxTokens: u.maxTokens ?? u.llm?.maxTokens ?? 4096,
+    maxSteps: u.maxSteps ?? u.llm?.maxSteps ?? 15,
+    screeningModel: resolveLlmModel(u.screeningModel ?? u.llm?.screeningModel),
+    managementModel: resolveLlmModel(u.managementModel ?? u.llm?.managementModel),
+    generalModel: resolveLlmModel(u.generalModel ?? u.llm?.generalModel),
   },
   strategy: {
     requireBacktestApproval: u.requireBacktestApproval ?? false,
     activeStrategyId: u.activeStrategyId ?? "scalp_mtf_default",
+    backtestPeriod: u.strategy?.backtestPeriod ?? "1y",
+    backtestInterval: u.strategy?.backtestInterval ?? "1h",
+    minSharpe: u.strategy?.minSharpe ?? 0.5,
+  },
+  darwin: {
+    enabled: u.darwin?.enabled ?? true,
+    windowDays: u.darwin?.windowDays ?? 60,
+    minSamples: u.darwin?.minSamples ?? 8,
+    boostFactor: u.darwin?.boostFactor ?? 1.05,
+    decayFactor: u.darwin?.decayFactor ?? 0.95,
+    weightFloor: u.darwin?.weightFloor ?? 0.3,
+    weightCeiling: u.darwin?.weightCeiling ?? 2.5,
+    recalcEveryN: u.darwin?.recalcEveryN ?? 5,
+  },
+  setupMemory: {
+    cooldownMinSetups: u.setupMemory?.cooldownMinSetups ?? 3,
+    cooldownMaxWinRate: u.setupMemory?.cooldownMaxWinRate ?? 25,
+    cooldownHours: u.setupMemory?.cooldownHours ?? 24,
   },
 };
 

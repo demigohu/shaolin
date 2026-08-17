@@ -11,5 +11,6 @@ screening-log.json
 lessons.json
 strategies.json
 setup-memory.json
+signal-weights.json
 logs/
 .DS_Store

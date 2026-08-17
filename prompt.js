@@ -5,6 +5,8 @@ import { getSetupsSummary } from "./setups.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
 import { getScreeningSummary } from "./screening-log.js";
 import { formatPriceDual } from "./tools/price.js";
+import { getSetupMemorySummary } from "./setup-memory.js";
+import { getWeightsSummary } from "./signal-weights.js";
 
 export function buildSystemPrompt(agentType, context = {}) {
   const mode = getActiveMode();
@@ -40,9 +42,15 @@ WORKFLOW:
 1. Call get_xauusd_mtf and get_xauusd_combined (and get_gold_news if macro risk).
 2. Synthesize bias, key levels, and whether conditions meet min confidence/RR.
 3. If actionable SETUP: call propose_setup with side, entry, sl, confidence, reason, thesis_id, risks.
+   Respect thesis memory cooldowns and prioritize higher-weighted signals.
 4. If not ready: respond with action WATCH or AVOID — no propose_setup.
 
 Session allowed: ${isSessionAllowed(mode) ? "yes" : "no — prefer AVOID/WATCH"}
+
+${config.darwin?.enabled !== false ? getWeightsSummary() : ""}
+
+Thesis memory:
+${getSetupMemorySummary()}
 
 Lessons:
 ${getLessonsForPrompt()}

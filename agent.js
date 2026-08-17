@@ -40,6 +40,9 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, agentType 
   const usedModel = model || (agentType === "SCREENER" ? config.llm.screeningModel : agentType === "MANAGER" ? config.llm.managementModel : config.llm.generalModel);
 
   for (let step = 0; step < maxSteps; step++) {
+    if (step === 0) {
+      log("agent", `LLM ${process.env.LLM_BASE_URL || "openrouter"} | model ${usedModel}`);
+    }
     log("agent", `Step ${step + 1}/${maxSteps} [${agentType}]`);
 
     const toolChoice = step === 0 && agentType === "SCREENER" ? "required" : "auto";

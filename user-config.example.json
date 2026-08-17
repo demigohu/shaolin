@@ -76,13 +76,27 @@
     "temperature": 0.35,
     "maxTokens": 4096,
     "maxSteps": 15,
-    "screeningModel": "openrouter/healer-alpha",
-    "managementModel": "openrouter/healer-alpha",
-    "generalModel": "openrouter/healer-alpha"
+    "screeningModel": null,
+    "managementModel": null,
+    "generalModel": null
   },
   "strategy": {
     "requireBacktestApproval": false,
-    "activeStrategyId": "scalp_mtf_default"
+    "activeStrategyId": "scalp_mtf_default",
+    "backtestPeriod": "1y",
+    "backtestInterval": "1h",
+    "minSharpe": 0.5
+  },
+  "darwin": {
+    "enabled": true,
+    "windowDays": 60,
+    "minSamples": 8,
+    "recalcEveryN": 5
+  },
+  "setupMemory": {
+    "cooldownMinSetups": 3,
+    "cooldownMaxWinRate": 25,
+    "cooldownHours": 24
   },
   "telegramChatId": null
 }

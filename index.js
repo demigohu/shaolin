@@ -8,6 +8,7 @@ import { appendScreeningDecision } from "./screening-log.js";
 import {
   expireStaleSetups,
   getOpenSetups,
+  getSetupsSummary,
   markTpLevelHit,
   persistSetup,
   resolveSetup,
@@ -18,7 +19,10 @@ import { sendMessage, startPolling, isEnabled as telegramEnabled } from "./teleg
 import { closeMcp } from "./tools/mcp-client.js";
 import { getXauusdPrice } from "./tools/market.js";
 import { toPips } from "./tools/price.js";
-import { isStrategyApproved, getActiveStrategy } from "./strategies.js";
+import { isStrategyApproved, getActiveStrategy, ensureStrategyApproved } from "./strategies.js";
+import { formatAgentStatus } from "./status.js";
+import { getWeightsSummary } from "./signal-weights.js";
+import { getSetupMemorySummary } from "./setup-memory.js";
 
 let _screeningBusy = false;
 let _managementBusy = false;
@@ -52,18 +56,44 @@ export async function runScreeningCycle({ silent = false } = {}) {
     }
 
     const strategy = getActiveStrategy();
-    if (config.strategy.requireBacktestApproval && !isStrategyApproved(strategy.id)) {
-      const msg = `Strategy ${strategy.id} not backtest-approved — skipping`;
-      appendScreeningDecision({ action: "AVOID", summary: msg });
-      if (!silent) await sendMessage(`🥋 ${msg}`);
-      return msg;
+    if (config.strategy.requireBacktestApproval) {
+      const gate = await ensureStrategyApproved(strategy.id);
+      if (!gate.approved) {
+        const msg = gate.error
+          ? `Strategy ${strategy.id} backtest failed: ${gate.error}`
+          : `Strategy ${strategy.id} not backtest-approved — skipping`;
+        appendScreeningDecision({ action: "AVOID", summary: msg, reason: gate.error || "backtest_gate" });
+        if (!silent) await sendMessage(`🥋 ${msg}`);
+        return msg;
+      }
+    } else if (!isStrategyApproved(strategy.id)) {
+      log("backtest_gate", `Strategy ${strategy.id} not approved but gate disabled`);
     }
 
     expireStaleSetups(mode.setupMaxAgeMin);
 
     const goal = `Run XAUUSD screening for ${mode.label}. Analyze MTF + combined TA. If conditions meet min confidence ${mode.minConfidence}% and RR ${mode.minRrRatio}, call propose_setup once. Otherwise report WATCH or AVOID with reason.`;
 
-    const { content, messages } = await agentLoop(goal, config.llm.maxSteps, "SCREENER", config.llm.screeningModel);
+    const toolStarts = new Map();
+    const { content, messages } = await agentLoop(
+      goal,
+      config.llm.maxSteps,
+      "SCREENER",
+      config.llm.screeningModel,
+      {
+        onToolStart: ({ name }) => {
+          toolStarts.set(name, Date.now());
+        },
+        onToolFinish: ({ name, result }) => {
+          const ms = Date.now() - (toolStarts.get(name) || Date.now());
+          const ok = !result?.error && result?.success !== false && !result?.blocked;
+          const mark = ok ? "✓" : "✗";
+          const line = `[${name}] ${mark} (${ms}ms)`;
+          if (!silent) console.log(line);
+          else log("tool", line);
+        },
+      },
+    );
 
     const setup = extractLastSetupFromMessages(messages);
     if (setup) {
@@ -223,9 +253,28 @@ async function telegramHandler(msg) {
     return;
   }
   if (text === "/status") {
-    const mode = getActiveMode();
+    await sendMessage(formatAgentStatus());
+    return;
+  }
+  if (text === "/setups") {
     const open = getOpenSetups();
-    await sendMessage(`Mode: ${mode.id}\nOpen setups: ${open.length}\nSymbol: OANDA:XAUUSD`);
+    await sendMessage(open.length ? getSetupsSummary() : "No open setups.");
+    return;
+  }
+  if (text === "/manage") {
+    await sendMessage("Running management cycle...");
+    const result = await runManagementCycle();
+    await sendMessage(result || "Done.");
+    return;
+  }
+  if (text === "/weights") {
+    await sendMessage(config.darwin?.enabled === false
+      ? "Darwin signal weights disabled."
+      : getWeightsSummary());
+    return;
+  }
+  if (text === "/memory") {
+    await sendMessage(`Thesis memory:\n${getSetupMemorySummary(8)}`);
     return;
   }
   if (text.startsWith("/mode ")) {
@@ -240,7 +289,15 @@ async function telegramHandler(msg) {
     return;
   }
   if (text === "/help") {
-    await sendMessage("/screen — run screening\n/status — agent status\n/mode scalp|day|swing — switch mode");
+    await sendMessage([
+      "/screen — run screening now",
+      "/manage — run management cycle",
+      "/status — mode, setups, performance, memory",
+      "/setups — open setups only",
+      "/weights — signal weight summary",
+      "/memory — thesis history",
+      "/mode scalp|day|swing — switch mode",
+    ].join("\n"));
     return;
   }
 
@@ -251,6 +308,19 @@ async function telegramHandler(msg) {
 const isMain = process.argv[1]?.endsWith("index.js");
 if (isMain) {
   log("startup", `Shaolin starting — mode ${config.activeMode} — ${process.env.DRY_RUN === "true" ? "DRY_RUN" : "LIVE"}`);
+
+  if (config.strategy.requireBacktestApproval) {
+    ensureStrategyApproved()
+      .then((gate) => {
+        if (gate.approved) {
+          log("backtest_gate", `Strategy ${gate.strategy_id} approved for screening`);
+        } else {
+          log("backtest_gate", `Strategy ${gate.strategy_id} NOT approved — screening will skip until backtest passes`);
+        }
+      })
+      .catch((error) => log("backtest_gate_error", error.message));
+  }
+
   startCronJobs();
   if (telegramEnabled()) startPolling(telegramHandler);
   runScreeningCycle({ silent: false }).catch((e) => log("startup_error", e.message));

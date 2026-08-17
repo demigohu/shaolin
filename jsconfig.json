@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "checkJs": false,
+    "allowJs": true
+  },
+  "include": ["*.js", "tools/**/*.js", "scripts/**/*.js"],
+  "exclude": ["node_modules", "mcp", "logs"]
+}

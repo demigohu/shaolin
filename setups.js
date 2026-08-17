@@ -4,6 +4,7 @@ import { log } from "./logger.js";
 import { getActiveMode } from "./modes.js";
 import { computeTpLevels, computeRrRatio, roundToPips, toPips } from "./tools/price.js";
 import { config } from "./config.js";
+import { isThesisOnCooldown } from "./setup-memory.js";
 
 const SETUPS_FILE = repoPath("setups.json");
 
@@ -93,6 +94,10 @@ export function createSetup(input) {
   const duplicate = findDuplicateThesis(candidate);
   if (duplicate) {
     return { skipped: true, reason: "duplicate_thesis", existing: duplicate.id };
+  }
+
+  if (isThesisOnCooldown(candidate)) {
+    return { skipped: true, reason: "thesis_cooldown", thesis_id: input.thesis_id || null };
   }
 
   if (countSetupsToday() >= (config.screening.maxSetupsPerDay ?? 8)) {

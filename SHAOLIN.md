@@ -34,6 +34,8 @@ XAUUSD agent: screening → auto-log setup → monitor → lessons.
 | `screening-log.json` | Audit every screening cycle |
 | `lessons.json` | Performance + derived rules |
 | `strategies.json` | Strategy library + backtest results |
+| `setup-memory.json` | Thesis fingerprint history + cooldowns |
+| `signal-weights.json` | Darwinian signal weights (learned) |
 | `user-config.json` | Modes, broker pipSize, LLM models |
 
 ## Setup lifecycle
@@ -57,8 +59,18 @@ Intervals from active mode in `user-config.json` (scalp: 10m screen / 3m manage)
 
 ReAct loop, JSON state, decision log, hybrid deterministic management, Telegram ops.
 
+## Phase 2 (learning + gates) ✓
+
+- **setup-memory** — thesis fingerprint history, cooldown on repeated failures
+- **signal-weights** — Darwinian recalc every N closed setups; injected into SCREENER prompt
+- **backtest gate** — `strategy.requireBacktestApproval` blocks screening/propose_setup until MCP backtest passes
+
+## Ops
+
+- **PM2:** `npm run pm2:start` / `npm run pm2:stop` / `npm run pm2:logs`
+- **CLI:** `node cli.js status|memory|weights|gate`
+
 ## Not in v0.1
 
-- HiveMind, signal weights evolution, setup-memory snapshots
-- Full Telegram live messages
-- PM2 ecosystem file
+- HiveMind
+- PM2 is supported; live-updating Telegram messages not implemented

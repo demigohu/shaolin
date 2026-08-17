@@ -16,13 +16,31 @@ npm run setup          # wizard + optional keys
 npm run mcp:install    # Python 3.13 venv + tradingview-mcp from source
 npm run mcp:smoke      # verify OANDA XAUUSD + price feed
 npm run dev            # start daemon (DRY_RUN=true)
+npm start              # production daemon
+npm run pm2:start      # PM2 background daemon
+```
+
+## CLI
+
+```bash
+node cli.js screen     # one screening cycle
+node cli.js manage     # one management cycle
+node cli.js status     # mode, setups, memory, weights
+node cli.js memory     # thesis history
+node cli.js weights    # signal weights
+node cli.js gate       # run/check backtest gate
+node cli.js backtest   # compare MCP strategies
 ```
 
 ## Telegram
 
 ```
 /screen          Run screening now
-/status          Mode + open setups
+/manage          Run management cycle
+/status          Full agent status
+/setups          Open setups
+/weights         Signal weights
+/memory          Thesis history
 /mode scalp      Switch mode (scalp|day|swing)
 /help
 ```
@@ -34,6 +52,8 @@ Edit `user-config.json`:
 - `activeMode` — scalp | day | swing
 - `broker.pipSize` — 0.01 for HFM 2-digit gold
 - `broker.priceOffset` — OANDA vs HFM quote difference
+- `darwin.enabled` — signal weight evolution (Phase 2)
+- `strategy.requireBacktestApproval` — block screening until backtest passes
 
 ## Architecture
 

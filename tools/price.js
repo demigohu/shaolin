@@ -1,4 +1,4 @@
-import { config } from "./config.js";
+import { config } from "../config.js";
 
 export function toBrokerPrice(oandaPrice) {
   const n = Number(oandaPrice);
