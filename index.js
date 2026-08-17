@@ -308,7 +308,13 @@ async function telegramHandler(msg) {
   await reply(content?.slice(0, 4000) || "Done.");
 }
 
-const isMain = process.argv[1]?.endsWith("index.js");
+import path from "path";
+import { fileURLToPath } from "url";
+
+const indexPath = fileURLToPath(import.meta.url);
+const entrypoint = process.env.pm_exec_path || process.argv[1] || "";
+const isMain = process.env.pm_id != null
+  || (entrypoint && path.resolve(entrypoint) === indexPath);
 if (isMain) {
   log("startup", `Shaolin starting — mode ${config.activeMode} — ${process.env.DRY_RUN === "true" ? "DRY_RUN" : "LIVE"}`);
 
