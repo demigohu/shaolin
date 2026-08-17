@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import "dotenv/config";
 import { runScreeningCycle, runManagementCycle } from "./index.js";
+import { cancelSetup, cancelAllOpenSetups, getSetupsSummary, getOpenSetups } from "./setups.js";
 import { closeMcp } from "./tools/mcp-client.js";
 import { compareStrategies } from "./tools/backtest.js";
 import { ensureStrategyApproved, getActiveStrategy } from "./strategies.js";
@@ -45,7 +46,18 @@ async function main() {
     case "backtest":
       console.log(JSON.stringify(await compareStrategies({ period: "1y", interval: "1h" }), null, 2));
       break;
-    case "telegram-test":
+    case "cancel":
+      if (!arg || arg === "all") {
+        const ids = cancelAllOpenSetups();
+        console.log(ids.length ? `Cancelled: ${ids.join(", ")}` : "No open setups.");
+      } else {
+        const setup = cancelSetup(arg);
+        console.log(setup ? `Cancelled: ${arg}` : `Setup not found: ${arg}`);
+      }
+      break;
+    case "setups":
+      console.log(getOpenSetups().length ? getSetupsSummary() : "No open setups.");
+      break;
       console.log(JSON.stringify(await testTelegram(), null, 2));
       break;
     case "smoke":
@@ -57,6 +69,9 @@ async function main() {
   node cli.js screen      Run one screening cycle
   node cli.js manage      Run one management cycle
   node cli.js status      Agent status summary
+  node cli.js setups      List open setups
+  node cli.js cancel all  Cancel all open setups
+  node cli.js cancel <id> Cancel one setup by ID
   node cli.js memory      Thesis memory (or pass fingerprint)
   node cli.js weights     Signal weight summary
   node cli.js gate        Run/check backtest gate

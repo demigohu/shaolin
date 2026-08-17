@@ -11,6 +11,8 @@ import {
   getSetupsSummary,
   markTpLevelHit,
   persistSetup,
+  cancelSetup,
+  cancelAllOpenSetups,
   resolveSetup,
 } from "./setups.js";
 import { recordSetupOutcome } from "./lessons.js";
@@ -276,6 +278,17 @@ async function telegramHandler(msg) {
     await reply(open.length ? getSetupsSummary() : "No open setups.");
     return;
   }
+  if (text.startsWith("/cancel")) {
+    const id = text.split(/\s+/)[1];
+    if (!id || id === "all") {
+      const ids = cancelAllOpenSetups();
+      await reply(ids.length ? `Cancelled ${ids.length} setup(s):\n${ids.join("\n")}` : "No open setups.");
+    } else {
+      const setup = cancelSetup(id);
+      await reply(setup ? `Cancelled ${id}` : `Setup not found: ${id}`);
+    }
+    return;
+  }
   if (text === "/manage") {
     await reply("Running management cycle...");
     const result = await runManagementCycle();
@@ -309,6 +322,8 @@ async function telegramHandler(msg) {
       "/manage — run management cycle",
       "/status — mode, setups, performance, memory",
       "/setups — open setups only",
+      "/cancel all — cancel all open setups",
+      "/cancel <setup-id> — cancel one setup",
       "/weights — signal weight summary",
       "/memory — thesis history",
       "/mode scalp|day|swing — switch mode",

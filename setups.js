@@ -209,6 +209,22 @@ export function resolveSetup(id, outcome, extra = {}) {
   return setup;
 }
 
+/** User-initiated cancel — removes setup from active monitoring. */
+export function cancelSetup(id, reason = "user_cancelled") {
+  const setup = resolveSetup(id, "cancelled", { pnl_pips: 0, reason });
+  if (setup) log("setups", `Cancelled ${id}: ${reason}`);
+  return setup;
+}
+
+export function cancelAllOpenSetups(reason = "user_cancelled_all") {
+  const open = findActiveSetups();
+  for (const s of open) {
+    resolveSetup(s.id, "cancelled", { pnl_pips: 0, reason });
+  }
+  if (open.length) log("setups", `Cancelled ${open.length} open setup(s): ${reason}`);
+  return open.map((s) => s.id);
+}
+
 export function markTpLevelHit(setup, levelIndex, currentPrice) {
   const level = setup.tp_levels?.[levelIndex];
   if (!level || level.status === "hit") return setup;
