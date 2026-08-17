@@ -1,7 +1,7 @@
 import fs from "fs";
 import { repoPath } from "./repo-root.js";
 import { config } from "./config.js";
-import { runBacktest } from "./tools/backtest.js";
+import { runBacktest, formatBacktestError, isYahooRateLimitError } from "./tools/backtest.js";
 import { log } from "./logger.js";
 
 const FILE = repoPath("strategies.json");
@@ -10,6 +10,9 @@ export const MCP_STRATEGIES = [
   "rsi", "bollinger", "macd", "ema_cross", "supertrend",
   "donchian", "rsi_pullback", "keltner_breakout", "triple_ema",
 ];
+
+let _lastBacktestAt = 0;
+const BACKTEST_COOLDOWN_MS = 60_000;
 
 const DEFAULTS = {
   active: "scalp_mtf_default",
@@ -120,7 +123,18 @@ export async function backtestMcpStrategy(mcpStrategy, { period, interval, activ
     return { error: `Unknown strategy. Available: ${MCP_STRATEGIES.join(", ")}` };
   }
 
+  const sinceLast = Date.now() - _lastBacktestAt;
+  if (_lastBacktestAt && sinceLast < BACKTEST_COOLDOWN_MS) {
+    const waitSec = Math.ceil((BACKTEST_COOLDOWN_MS - sinceLast) / 1000);
+    return {
+      error: `Tunggu ${waitSec}s sebelum backtest lagi (cooldown Yahoo Finance).`,
+      rate_limited: true,
+    };
+  }
+
   const entry = ensureStrategyEntry(mcpStrategy, modeId ?? config.activeMode);
+  _lastBacktestAt = Date.now();
+
   const result = await runBacktest({
     strategy: mcpStrategy,
     period: period || config.strategy.backtestPeriod,
@@ -128,8 +142,12 @@ export async function backtestMcpStrategy(mcpStrategy, { period, interval, activ
     strategyId: entry.id,
   });
 
-  if (result?.error) {
-    return { error: result.error, strategy_id: entry.id };
+  if (result?.error || isYahooRateLimitError(result)) {
+    return {
+      error: result?.error || formatBacktestError(result),
+      rate_limited: result?.rate_limited ?? isYahooRateLimitError(result),
+      strategy_id: entry.id,
+    };
   }
 
   const strategy = getStrategy(entry.id);

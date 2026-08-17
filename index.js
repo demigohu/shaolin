@@ -320,7 +320,7 @@ async function telegramHandler(msg) {
     try {
       const out = await backtestMcpStrategy(mcp, { activate });
       if (out.error) {
-        await reply(`❌ ${out.error}`);
+        await reply(out.rate_limited ? out.error : `❌ ${out.error}`);
         return;
       }
       await reply([out.summary, "", out.message].filter(Boolean).join("\n"));
