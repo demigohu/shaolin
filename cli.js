@@ -8,6 +8,7 @@ import { formatAgentStatus } from "./status.js";
 import { getSetupMemorySummary, getThesisMemory } from "./setup-memory.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { config } from "./config.js";
+import { testTelegram, getTelegramStatus } from "./telegram.js";
 
 const cmd = process.argv[2];
 const arg = process.argv[3];
@@ -44,6 +45,9 @@ async function main() {
     case "backtest":
       console.log(JSON.stringify(await compareStrategies({ period: "1y", interval: "1h" }), null, 2));
       break;
+    case "telegram-test":
+      console.log(JSON.stringify(await testTelegram(), null, 2));
+      break;
     case "smoke":
       console.log("Use: npm run mcp:smoke");
       break;
@@ -56,6 +60,7 @@ async function main() {
   node cli.js memory      Thesis memory (or pass fingerprint)
   node cli.js weights     Signal weight summary
   node cli.js gate        Run/check backtest gate
+  node cli.js telegram-test  Test Telegram bot + send ping
   node cli.js backtest    Compare strategies on XAUUSD
   node cli.js smoke       MCP smoke test
 `);

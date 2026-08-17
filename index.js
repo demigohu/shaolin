@@ -15,7 +15,7 @@ import {
 } from "./setups.js";
 import { recordSetupOutcome } from "./lessons.js";
 import { formatSetupAlert } from "./prompt.js";
-import { sendMessage, startPolling, isEnabled as telegramEnabled } from "./telegram.js";
+import { sendMessage, startPolling, isEnabled as telegramEnabled, getTelegramStatus } from "./telegram.js";
 import { closeMcp } from "./tools/mcp-client.js";
 import { getXauusdPrice } from "./tools/market.js";
 import { toPips } from "./tools/price.js";
@@ -246,35 +246,38 @@ export function startCronJobs() {
 }
 
 async function telegramHandler(msg) {
+  const chatId = msg.chat?.id;
+  const reply = (text) => sendMessage(text, chatId);
+
   const text = (msg.text || "").trim();
   if (text === "/screen") {
-    await sendMessage("Running screening...");
+    await reply("Running screening...");
     await runScreeningCycle();
     return;
   }
   if (text === "/status") {
-    await sendMessage(formatAgentStatus());
+    await reply(formatAgentStatus());
     return;
   }
   if (text === "/setups") {
     const open = getOpenSetups();
-    await sendMessage(open.length ? getSetupsSummary() : "No open setups.");
+    await reply(open.length ? getSetupsSummary() : "No open setups.");
     return;
   }
   if (text === "/manage") {
-    await sendMessage("Running management cycle...");
+    await reply("Running management cycle...");
     const result = await runManagementCycle();
-    await sendMessage(result || "Done.");
+    await reply(result || "Done.");
     return;
   }
   if (text === "/weights") {
-    await sendMessage(config.darwin?.enabled === false
+    await reply(config.darwin?.enabled === false
       ? "Darwin signal weights disabled."
       : getWeightsSummary());
     return;
   }
   if (text === "/memory") {
-    await sendMessage(`Thesis memory:\n${getSetupMemorySummary(8)}`);
+    await reply(`Thesis memory:\n${getSetupMemorySummary(8)}`);
     return;
   }
   if (text.startsWith("/mode ")) {
@@ -282,14 +285,14 @@ async function telegramHandler(msg) {
     try {
       switchMode(id);
       startCronJobs();
-      await sendMessage(`Switched to mode: ${id}`);
+      await reply(`Switched to mode: ${id}`);
     } catch (error) {
-      await sendMessage(error.message);
+      await reply(error.message);
     }
     return;
   }
   if (text === "/help") {
-    await sendMessage([
+    await reply([
       "/screen — run screening now",
       "/manage — run management cycle",
       "/status — mode, setups, performance, memory",
@@ -302,12 +305,19 @@ async function telegramHandler(msg) {
   }
 
   const { content } = await agentLoop(text, config.llm.maxSteps, "GENERAL", config.llm.generalModel);
-  await sendMessage(content?.slice(0, 4000) || "Done.");
+  await reply(content?.slice(0, 4000) || "Done.");
 }
 
 const isMain = process.argv[1]?.endsWith("index.js");
 if (isMain) {
   log("startup", `Shaolin starting — mode ${config.activeMode} — ${process.env.DRY_RUN === "true" ? "DRY_RUN" : "LIVE"}`);
+
+  const tg = getTelegramStatus();
+  if (tg.enabled) {
+    log("startup", `Telegram ON → chat ${tg.chatId}`);
+  } else {
+    log("startup_warn", `Telegram OFF — token=${tg.hasToken ? "yes" : "NO"}, chatId=${tg.hasChatId ? "yes" : "NO"}. Set TELEGRAM_BOT_TOKEN in .env`);
+  }
 
   if (config.strategy.requireBacktestApproval) {
     ensureStrategyApproved()
