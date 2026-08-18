@@ -26,7 +26,7 @@ import {
 } from "./notifications.js";
 import { sendMessage, startPolling, isEnabled as telegramEnabled, getTelegramStatus } from "./telegram.js";
 import { closeMcp } from "./tools/mcp-client.js";
-import { getXauusdPrice } from "./tools/market.js";
+import { getManagementPrice } from "./tools/market.js";
 import { toPips } from "./tools/price.js";
 import { isStrategyApproved, getActiveStrategy, ensureStrategyApproved, backtestMcpStrategy, formatStrategiesList, setActiveStrategy, MCP_STRATEGIES, strategyIdFor } from "./strategies.js";
 import { compareStrategies } from "./tools/backtest.js";
@@ -140,9 +140,6 @@ export async function runScreeningCycle({ silent = false } = {}) {
   }
 }
 
-function getLivePrice(quote) {
-  return quote?.price ?? quote?.regularMarketPrice ?? quote?.last ?? quote?.close ?? null;
-}
 
 export async function runManagementCycle({ silent = false, forceDigest = false } = {}) {
   if (_managementBusy) return null;
@@ -159,16 +156,19 @@ export async function runManagementCycle({ silent = false, forceDigest = false }
 
     let quote;
     try {
-      quote = await getXauusdPrice();
+      quote = await getManagementPrice();
     } catch (error) {
       log("mgmt_error", `Price fetch failed: ${error.message}`);
       return null;
     }
 
-    const price = getLivePrice(quote);
+    const price = quote?.price;
     if (price == null) {
       log("mgmt_warn", "No price in quote");
       return null;
+    }
+    if (quote.source === "yahoo") {
+      log("mgmt_warn", "Using Yahoo GC=F for management — may mismatch OANDA setup levels");
     }
 
     const events = [];

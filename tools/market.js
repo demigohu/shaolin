@@ -104,6 +104,35 @@ export async function getXauusdPrice() {
   });
 }
 
+/** Management TP/SL — prefer OANDA spot (same feed as setup levels), fallback Yahoo GC=F. */
+export async function getManagementPrice() {
+  try {
+    const analysis = await callMcpTool("coin_analysis", {
+      symbol: config.market.dataSymbol,
+      exchange: config.market.dataExchange,
+      timeframe: "5m",
+    });
+    const price = analysis?.price ?? analysis?.close ?? analysis?.indicators?.close;
+    if (Number.isFinite(Number(price))) {
+      return {
+        price: Number(price),
+        source: "oanda",
+        symbol: `${config.market.dataExchange}:${config.market.dataSymbol}`,
+      };
+    }
+  } catch {
+    /* fallback below */
+  }
+
+  const quote = await getXauusdPrice();
+  const price = quote?.price ?? quote?.regularMarketPrice ?? quote?.last ?? quote?.close;
+  return {
+    price: Number.isFinite(Number(price)) ? Number(price) : null,
+    source: "yahoo",
+    symbol: config.market.yahooSymbol,
+  };
+}
+
 export async function getGoldNews(limit = 5) {
   return callMcpTool("financial_news", {
     symbol: "XAUUSD",

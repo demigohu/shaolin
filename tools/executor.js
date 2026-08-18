@@ -75,6 +75,30 @@ const toolMap = {
       setup_confidence: args.confidence ?? staged.setup_confidence ?? null,
     };
 
+    const rsi = screeningSnapshot.rsi;
+    if (config.screening?.blockExtremeRsi !== false && typeof rsi === "number") {
+      const noShort = config.screening.rsiNoShortBelow ?? 35;
+      const noLong = config.screening.rsiNoLongAbove ?? 65;
+      if (args.side === "short" && rsi < noShort) {
+        return {
+          success: false,
+          blocked: true,
+          reason: "rsi_oversold_no_short",
+          rsi,
+          message: `RSI ${rsi} oversold — avoid short scalp (bounce risk). Prefer WATCH or wait for pullback.`,
+        };
+      }
+      if (args.side === "long" && rsi > noLong) {
+        return {
+          success: false,
+          blocked: true,
+          reason: "rsi_overbought_no_long",
+          rsi,
+          message: `RSI ${rsi} overbought — avoid long scalp. Prefer WATCH.`,
+        };
+      }
+    }
+
     const result = createSetup({
       ...args,
       session: getCurrentSession(),

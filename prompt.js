@@ -50,6 +50,11 @@ WORKFLOW:
 2. Synthesize bias, key levels, and whether conditions meet min confidence/RR.
 3. If SETUP and NO open setups: call propose_setup once with tight scalp SL.
 4. If open setup exists OR not ready: WATCH or AVOID — never propose_setup.
+
+RSI EXTREME RULES (hard — propose_setup will be blocked):
+- Do NOT short when combined RSI < ${config.screening?.rsiNoShortBelow ?? 35} (oversold bounce risk on gold).
+- Do NOT long when combined RSI > ${config.screening?.rsiNoLongAbove ?? 65}.
+- Fully aligned bearish MTF + oversold RSI = WATCH for pullback, not blind short.
 ${slRule}
 
 Session allowed: ${isSessionAllowed(mode) ? "yes" : "no — prefer AVOID/WATCH"}

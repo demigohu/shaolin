@@ -88,6 +88,9 @@ export const config = {
     maxSetupsPerDay: u.maxSetupsPerDay ?? 8,
     newsBlackoutMinutes: u.newsBlackoutMinutes ?? 0,
     nearTpSlAlertPct: u.nearTpSlAlertPct ?? 80,
+    blockExtremeRsi: u.screening?.blockExtremeRsi !== false,
+    rsiNoShortBelow: u.screening?.rsiNoShortBelow ?? 35,
+    rsiNoLongAbove: u.screening?.rsiNoLongAbove ?? 65,
   },
   management: {
     breakevenAlertAfterTp1: u.breakevenAlertAfterTp1 ?? true,
