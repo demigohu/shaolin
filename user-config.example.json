@@ -29,7 +29,7 @@
         { "pct": 50, "atRr": 1.0 },
         { "pct": 50, "atRr": 2.0 }
       ],
-      "sessions": ["london", "new_york", "overlap"]
+      "sessions": ["any"]
     },
     "day": {
       "label": "Day Trading",
@@ -73,6 +73,17 @@
   },
   "management": {
     "breakevenAlertAfterTp1": true
+  },
+  "notifications": {
+    "enabled": true,
+    "digestEveryManagementCycles": 5,
+    "notifySessionSkip": false,
+    "notifyOpenSetupSkip": false,
+    "cooldownMin": {
+      "off_session": 240,
+      "open_setup_skip": 120,
+      "management_digest": 15
+    }
   },
   "llm": {
     "temperature": 0.35,

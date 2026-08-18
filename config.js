@@ -39,7 +39,7 @@ const defaultModes = {
     minRrRatio: 1.2,
     combinedTimeframe: "5m",
     partialTp: [{ pct: 50, atRr: 1.0 }, { pct: 50, atRr: 2.0 }],
-    sessions: ["london", "new_york", "overlap"],
+    sessions: ["any"],
   },
   day: {
     label: "Day Trading",
@@ -91,6 +91,18 @@ export const config = {
   },
   management: {
     breakevenAlertAfterTp1: u.breakevenAlertAfterTp1 ?? true,
+  },
+  notifications: {
+    enabled: u.notifications?.enabled !== false,
+    digestEveryManagementCycles: u.notifications?.digestEveryManagementCycles ?? 5,
+    notifySessionSkip: u.notifications?.notifySessionSkip ?? false,
+    notifyOpenSetupSkip: u.notifications?.notifyOpenSetupSkip ?? false,
+    cooldownMin: {
+      off_session: u.notifications?.cooldownMin?.off_session ?? 240,
+      open_setup_skip: u.notifications?.cooldownMin?.open_setup_skip ?? 120,
+      management_digest: u.notifications?.cooldownMin?.management_digest ?? 15,
+      ...(u.notifications?.cooldownMin || {}),
+    },
   },
   llm: {
     temperature: u.temperature ?? u.llm?.temperature ?? 0.35,

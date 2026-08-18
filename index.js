@@ -16,7 +16,14 @@ import {
   resolveSetup,
 } from "./setups.js";
 import { recordSetupOutcome } from "./lessons.js";
-import { formatSetupAlert } from "./prompt.js";
+import {
+  formatSetupAlert,
+  shouldNotifyTelegram,
+  formatSessionSkip,
+  formatOpenSetupSkip,
+  formatManagementDigest,
+  formatEventAlert,
+} from "./notifications.js";
 import { sendMessage, startPolling, isEnabled as telegramEnabled, getTelegramStatus } from "./telegram.js";
 import { closeMcp } from "./tools/mcp-client.js";
 import { getXauusdPrice } from "./tools/market.js";
@@ -29,6 +36,7 @@ import { getSetupMemorySummary } from "./setup-memory.js";
 
 let _screeningBusy = false;
 let _managementBusy = false;
+let _mgmtCycleCount = 0;
 let cronTasks = [];
 
 function extractLastSetupFromMessages(messages) {
@@ -54,7 +62,10 @@ export async function runScreeningCycle({ silent = false } = {}) {
     if (!isSessionAllowed(mode)) {
       const msg = `Session not allowed for ${mode.id} — skipping screening`;
       appendScreeningDecision({ action: "AVOID", summary: msg, reason: "off_session" });
-      if (!silent) await sendMessage(`🥋 ${msg}`);
+      log("screen", msg);
+      if (!silent && config.notifications?.notifySessionSkip && shouldNotifyTelegram("off_session")) {
+        await sendMessage(formatSessionSkip(mode));
+      }
       return msg;
     }
 
@@ -80,8 +91,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
       const msg = `Open setup(s) active (${open.length}) — skipping new screening. Management monitors TP/SL every ${mode.managementIntervalMin}m.`;
       appendScreeningDecision({ action: "WATCH", summary: msg, reason: "open_setup_active" });
       log("screen", msg);
-      if (!silent) {
-        await sendMessage(`🥋 ${msg}\n\n${getSetupsSummary()}`);
+      if (!silent && config.notifications?.notifyOpenSetupSkip && shouldNotifyTelegram("open_setup_skip")) {
+        await sendMessage(formatOpenSetupSkip(open, mode));
       }
       return msg;
     }
@@ -125,7 +136,9 @@ export async function runScreeningCycle({ silent = false } = {}) {
     } else {
       const action = /AVOID/i.test(content) ? "AVOID" : "WATCH";
       appendScreeningDecision({ action, summary: content?.slice(0, 200), reason: content?.slice(0, 500) });
-      if (!silent) await sendMessage(`🥋 Screening: ${action}\n${(content || "").slice(0, 500)}`);
+      if (!silent && shouldNotifyTelegram(`screen_${action}`, 30)) {
+        await sendMessage(`🥋 Screening: ${action}\n${(content || "").slice(0, 500)}`);
+      }
     }
 
     return content;
@@ -138,9 +151,10 @@ function getLivePrice(quote) {
   return quote?.price ?? quote?.regularMarketPrice ?? quote?.last ?? quote?.close ?? null;
 }
 
-export async function runManagementCycle({ silent = false } = {}) {
+export async function runManagementCycle({ silent = false, forceDigest = false } = {}) {
   if (_managementBusy) return null;
   _managementBusy = true;
+  _mgmtCycleCount += 1;
   const mode = getActiveMode();
 
   try {
@@ -164,25 +178,19 @@ export async function runManagementCycle({ silent = false } = {}) {
       return null;
     }
 
-    const alerts = [];
-    const pip = config.broker.pipSize || 0.01;
-    const zone = (mode.entryZonePips ?? 3) * pip;
+    const events = [];
 
     for (const setup of open) {
       const side = setup.side;
       const entry = setup.entry;
       const sl = setup.sl;
+      const slHit = side === "long" ? price <= sl : price >= sl;
 
+      // Legacy setups may still be "proposed" — monitor TP/SL immediately, no activation alert.
       if (setup.status === "proposed") {
-        const inZone = Math.abs(price - entry) <= zone;
-        if (inZone) {
-          setup.status = "active";
-          setup.activated_at = new Date().toISOString();
-          alerts.push(`Setup ${setup.id} ACTIVE — price ${price} in entry zone`);
-        }
+        setup.status = "active";
+        setup.activated_at = setup.activated_at || new Date().toISOString();
       }
-
-      if (setup.status !== "active" && setup.status !== "proposed") continue;
 
       const risk = Math.abs(entry - sl);
       if (risk > 0) {
@@ -190,8 +198,7 @@ export async function runManagementCycle({ silent = false } = {}) {
         setup.max_rr_reached = Math.max(setup.max_rr_reached || 0, rr);
       }
 
-      let slHit = side === "long" ? price <= sl : price >= sl;
-      if (slHit && setup.status === "active") {
+      if (slHit) {
         const pnlPips = side === "long" ? toPips(price - entry) : toPips(entry - price);
         const resolved = resolveSetup(setup.id, setup.partial_filled?.length ? "tp_partial_then_sl" : "sl_hit", {
           pnl_pips: pnlPips,
@@ -199,7 +206,7 @@ export async function runManagementCycle({ silent = false } = {}) {
           partial_filled: setup.partial_filled,
         });
         if (resolved) recordSetupOutcome(resolved);
-        alerts.push(`🛑 SL HIT ${setup.id} @ ${price} (${pnlPips} pips)`);
+        events.push(`🛑 SL HIT ${setup.id} @ ${price} (${pnlPips} pips)`);
         continue;
       }
 
@@ -207,10 +214,10 @@ export async function runManagementCycle({ silent = false } = {}) {
         const tp = setup.tp_levels[i];
         if (tp.status === "hit") continue;
         const hit = side === "long" ? price >= tp.price : price <= tp.price;
-        if (hit && setup.status === "active") {
+        if (hit) {
           markTpLevelHit(setup, i, price);
           persistSetup(setup);
-          alerts.push(`🎯 TP${tp.level} HIT ${setup.id} @ ${price} — take ${tp.close_pct}% on MT5`);
+          events.push(`🎯 TP${tp.level} HIT ${setup.id} @ ${price} — take ${tp.close_pct}% on MT5`);
           if (setup.status === "resolved") {
             const pnlPips = side === "long" ? toPips(tp.price - entry) : toPips(entry - tp.price);
             setup.pnl_pips = pnlPips;
@@ -226,18 +233,32 @@ export async function runManagementCycle({ silent = false } = {}) {
         const dist = Math.abs(tp.price - price);
         const total = Math.abs(tp.price - entry);
         if (total > 0 && dist / total <= (1 - config.screening.nearTpSlAlertPct / 100)) {
-          alerts.push(`📍 Near TP${tp.level} on ${setup.id}: ${price} → ${tp.price}`);
+          events.push(`📍 Near TP${tp.level} ${setup.id}: ${price} → ${tp.price}`);
         }
       }
 
       persistSetup(setup);
     }
 
-    if (alerts.length && !silent) {
-      await sendMessage(alerts.join("\n"));
+    const stillOpen = getOpenSetups();
+    const digestEvery = config.notifications?.digestEveryManagementCycles ?? 5;
+    const sendDigest = forceDigest
+      || (stillOpen.length && _mgmtCycleCount % digestEvery === 0 && shouldNotifyTelegram("management_digest"));
+
+    if (!silent) {
+      if (forceDigest && stillOpen.length) {
+        await sendMessage(formatManagementDigest(stillOpen, price, events));
+      } else if (events.length) {
+        await sendMessage(formatEventAlert(events));
+      } else if (sendDigest && stillOpen.length) {
+        await sendMessage(formatManagementDigest(stillOpen, price));
+      }
     }
 
-    return alerts.join("\n") || "Management OK";
+    if (forceDigest && stillOpen.length) {
+      return formatManagementDigest(stillOpen, price, events);
+    }
+    return events.join("\n") || (stillOpen.length ? formatManagementDigest(stillOpen, price) : "Management OK");
   } finally {
     _managementBusy = false;
   }
@@ -250,7 +271,7 @@ export function startCronJobs() {
   const { screeningIntervalMin, managementIntervalMin } = getModeIntervals();
 
   cronTasks.push(cron.schedule(`*/${screeningIntervalMin} * * * *`, () => {
-    runScreeningCycle().catch((e) => log("cron_error", e.message));
+    runScreeningCycle({ silent: true }).catch((e) => log("cron_error", e.message));
   }));
 
   cronTasks.push(cron.schedule(`*/${managementIntervalMin} * * * *`, () => {
@@ -355,9 +376,9 @@ async function telegramHandler(msg) {
     return;
   }
   if (text === "/manage") {
-    await reply("Running management cycle...");
-    const result = await runManagementCycle();
-    await reply(result || "Done.");
+    await reply("Running management...");
+    const result = await runManagementCycle({ silent: true, forceDigest: true });
+    await reply(result?.slice(0, 4000) || "No open setups.");
     return;
   }
   if (text === "/weights") {
@@ -435,7 +456,7 @@ if (isMain) {
 
   startCronJobs();
   if (telegramEnabled()) startPolling(telegramHandler);
-  runScreeningCycle({ silent: false }).catch((e) => log("startup_error", e.message));
+  runScreeningCycle({ silent: true }).catch((e) => log("startup_error", e.message));
 
   process.on("SIGINT", async () => {
     await closeMcp();

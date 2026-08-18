@@ -4,7 +4,6 @@ import { getActiveStrategy } from "./strategies.js";
 import { getSetupsSummary } from "./setups.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
 import { getScreeningSummary } from "./screening-log.js";
-import { formatPriceDual } from "./tools/price.js";
 import { getSetupMemorySummary } from "./setup-memory.js";
 import { getWeightsSummary } from "./signal-weights.js";
 
@@ -109,17 +108,4 @@ Recent screening: ${getScreeningSummary()}
 `.trim();
 }
 
-export function formatSetupAlert(setup) {
-  const tps = (setup.tp_levels || []).map((t) => `TP${t.level}: ${formatPriceDual(t.price)} (${t.close_pct}%)`).join("\n");
-  return [
-    `🥋 SHAOLIN SETUP — ${setup.symbol} ${setup.side.toUpperCase()}`,
-    `Entry: ${formatPriceDual(setup.entry)}`,
-    `SL: ${formatPriceDual(setup.sl)} (${setup.sl_pips} pips)`,
-    tps || `TP: ${formatPriceDual(setup.tp)}`,
-    `RR: ${setup.rr_ratio} | Confidence: ${setup.confidence}% | Mode: ${setup.mode}`,
-    `Reason: ${setup.reason}`,
-    setup.risks?.length ? `⚠️ Risks: ${setup.risks.join("; ")}` : null,
-    `→ Entry manual di MT5 (${config.broker.name})`,
-    `Setup ID: ${setup.id}`,
-  ].filter(Boolean).join("\n");
-}
+// formatSetupAlert moved to notifications.js
