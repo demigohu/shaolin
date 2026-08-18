@@ -100,23 +100,16 @@ export async function runScreeningCycle({ silent = false } = {}) {
     const maxSl = mode.maxSlPips ?? 40;
     const goal = `Run XAUUSD ${mode.label} screening. Intraday TFs: ${mode.timeframes.join(", ")}. Analyze scalp MTF + combined TA on ${mode.combinedTimeframe}. If SETUP: tight SL max ${maxSl} pips, min confidence ${mode.minConfidence}%, min RR ${mode.minRrRatio}. Do NOT use Daily/Weekly Bollinger as SL. Otherwise WATCH or AVOID.`;
 
-    const toolStarts = new Map();
     const { content, messages } = await agentLoop(
       goal,
       config.llm.maxSteps,
       "SCREENER",
       config.llm.screeningModel,
       {
-        onToolStart: ({ name }) => {
-          toolStarts.set(name, Date.now());
-        },
-        onToolFinish: ({ name, result }) => {
-          const ms = Date.now() - (toolStarts.get(name) || Date.now());
-          const ok = !result?.error && result?.success !== false && !result?.blocked;
-          const mark = ok ? "✓" : "✗";
-          const line = `[${name}] ${mark} (${ms}ms)`;
-          if (!silent) console.log(line);
-          else log("tool", line);
+        onToolStart: ({ name, args }) => {
+          if (!silent && args && Object.keys(args).length) {
+            log("tool", `${name}(${JSON.stringify(args)})`);
+          }
         },
       },
     );

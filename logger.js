@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { repoPath } from "./repo-root.js";
+import { summarizeToolResult } from "./tools/tool-log.js";
 
 const LOG_DIR = repoPath("logs");
 const LOG_LEVEL = process.env.LOG_LEVEL || "info";
@@ -30,7 +31,23 @@ export function logAction(action) {
   const entry = { timestamp, ...action };
   const status = action.success ? "✓" : "✗";
   const dur = action.duration_ms != null ? ` (${action.duration_ms}ms)` : "";
-  console.log(`[${action.tool}] ${status}${dur}`);
+  const summary = action.summary
+    || (action.result ? summarizeToolResult(action.tool, action.result, action.args) : null);
+
+  const head = `[${action.tool}] ${status}${dur}`;
+  if (summary && process.env.SCREEN_VERBOSE !== "1") {
+    console.log(head);
+    for (const line of String(summary).split("\n")) {
+      console.log(`  ${line}`);
+    }
+  } else if (process.env.SCREEN_VERBOSE === "1" && action.result) {
+    console.log(head);
+    console.log(JSON.stringify(action.result, null, 2).slice(0, 4000));
+  } else {
+    console.log(head);
+  }
+
+  if (summary) entry.summary = summary;
 
   const dateStr = timestamp.split("T")[0];
   fs.appendFileSync(

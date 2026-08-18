@@ -3,7 +3,7 @@ export const tools = [
     type: "function",
     function: {
       name: "get_xauusd_mtf",
-      description: "Multi-timeframe analysis for XAUUSD (OANDA): Weekly→Daily→4H→1H→15m alignment.",
+      description: "Multi-timeframe analysis for XAUUSD (OANDA): intraday 5m→15m→1h→4h alignment (scalp) or Weekly→Daily stack (swing).",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },

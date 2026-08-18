@@ -20,7 +20,7 @@ function biasFromAnalysis(analysis) {
 
 export async function getScalpIntradayMtf() {
   const mode = getActiveMode();
-  const tfs = mode.timeframes || ["1m", "5m", "15m", "1h"];
+  const tfs = (mode.timeframes || ["5m", "15m", "1h", "4h"]).filter((tf) => tf !== "1m");
   const tfResults = {};
 
   await Promise.all(tfs.map(async (tf) => {
@@ -30,6 +30,10 @@ export async function getScalpIntradayMtf() {
         exchange: config.market.dataExchange,
         timeframe: tf,
       });
+      if (analysis?.error) {
+        tfResults[tf] = { error: analysis.error };
+        return;
+      }
       const { bias, score, rsi, signal } = biasFromAnalysis(analysis);
       tfResults[tf] = {
         label: `${tf} intraday`,
@@ -44,7 +48,9 @@ export async function getScalpIntradayMtf() {
     }
   }));
 
-  const scores = Object.values(tfResults).map((t) => t.score).filter((s) => typeof s === "number");
+  const scores = Object.values(tfResults)
+    .map((t) => (t.error ? null : t.score))
+    .filter((s) => typeof s === "number");
   const netScore = scores.reduce((a, b) => a + b, 0);
   let status = "MIXED/RANGING";
   let confidence = "Low";
@@ -84,10 +90,11 @@ export async function getXauusdMtf() {
 }
 
 export async function getXauusdCombined(timeframe) {
+  const tf = timeframe || getActiveMode().combinedTimeframe || "5m";
   return callMcpTool("combined_analysis", {
     symbol: config.market.dataSymbol,
     exchange: config.market.dataExchange,
-    timeframe: timeframe || "15m",
+    timeframe: tf,
   });
 }
 

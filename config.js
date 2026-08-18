@@ -28,7 +28,7 @@ if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 const defaultModes = {
   scalp: {
     label: "Scalping",
-    timeframes: ["1m", "5m", "15m", "1h"],
+    timeframes: ["5m", "15m", "1h", "4h"],
     mtfStyle: "intraday",
     screeningIntervalMin: 10,
     managementIntervalMin: 3,
