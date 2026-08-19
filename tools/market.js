@@ -34,6 +34,18 @@ export function extractPriceFromYahoo(quote) {
   return null;
 }
 
+/** MCP may return RSI as number or { value, signal }. */
+export function extractRsi(source) {
+  if (source == null) return null;
+  if (typeof source === "number" && Number.isFinite(source)) return source;
+  if (typeof source === "object") {
+    const n = Number(source.value ?? source.rsi);
+    if (Number.isFinite(n)) return n;
+  }
+  const n = Number(source);
+  return Number.isFinite(n) ? n : null;
+}
+
 function biasFromAnalysis(analysis) {
   if (!analysis || analysis.error) return { bias: "Unknown", score: 0 };
   const ms = analysis.market_sentiment || {};
@@ -41,7 +53,7 @@ function biasFromAnalysis(analysis) {
   let score = 0;
   if (signal.includes("buy") || signal.includes("bull")) score = 1;
   if (signal.includes("sell") || signal.includes("bear")) score = -1;
-  const rsi = analysis.indicators?.rsi ?? analysis.rsi;
+  const rsi = extractRsi(analysis.indicators?.rsi ?? analysis.rsi);
   if (typeof rsi === "number") {
     if (rsi > 55) score += 0.5;
     if (rsi < 45) score -= 0.5;

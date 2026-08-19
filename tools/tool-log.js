@@ -1,6 +1,6 @@
 /** One-line / multi-line summaries of MCP tool results for CLI + logs. */
 
-import { extractPriceFromYahoo } from "./market.js";
+import { extractPriceFromYahoo, extractRsi } from "./market.js";
 
 export function summarizeToolResult(name, result, args = {}) {
   if (!result) return "empty result";
@@ -38,7 +38,9 @@ function summarizeMtf(result) {
   if (result.analysis_type === "Scalp Intraday MTF" && result.timeframes) {
     const lines = Object.entries(result.timeframes).map(([tf, t]) => {
       if (t.error) return `${tf}: ERR ${t.error}`;
-      const rsi = t.rsi != null ? t.rsi.toFixed?.(1) ?? t.rsi : "?";
+      const rsiRaw = t.rsi;
+      const rsiNum = extractRsi(rsiRaw);
+      const rsi = rsiNum != null ? rsiNum.toFixed(1) : rsiRaw != null ? String(rsiRaw) : "?";
       return `${tf}: ${t.bias} rsi=${rsi} score=${t.score ?? 0} px=${t.price ?? "?"}`;
     });
     const align = result.alignment || {};
@@ -64,7 +66,9 @@ function summarizeCombined(result, args) {
   const tech = result.technical || {};
   const ms = tech.market_sentiment || {};
   const ind = tech.indicators || tech;
-  const rsi = ind.rsi ?? tech.rsi;
+  const rsiRaw = ind.rsi ?? tech.rsi;
+  const rsiNum = extractRsi(rsiRaw);
+  const rsi = rsiNum != null ? rsiNum.toFixed(1) : rsiRaw?.signal ?? "?";
   const momentum = ms.momentum || ms.buy_sell_signal || "?";
   const sent = result.sentiment?.sentiment_label
     ?? (result.sentiment?.sentiment_score != null ? result.sentiment.sentiment_score : "?");
