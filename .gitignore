@@ -8,6 +8,7 @@ __pycache__/
 user-config.json
 setups.json
 smc-state.json
+price-stream-state.json
 lessons.json
 strategies.json
 setup-memory.json

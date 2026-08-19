@@ -6,6 +6,14 @@ import { computeTpLevels, computeRrRatio, roundToPips, toPips } from "./tools/pr
 import { config } from "./config.js";
 import { isThesisOnCooldown } from "./setup-memory.js";
 import { getActiveStrategy } from "./strategies.js";
+import {
+  isInEntryZone,
+  distanceFromEntryPips,
+  shouldExpireStaleByDistance,
+  shouldInvalidatePreFill,
+} from "./tools/setup-gates.js";
+
+export { isInEntryZone, distanceFromEntryPips, shouldExpireStaleByDistance, shouldInvalidatePreFill };
 
 const SETUPS_FILE = repoPath("setups.json");
 
@@ -141,6 +149,11 @@ export function createSetup(input) {
   }
 
   const id = input.id || `setup-${Date.now()}`;
+  const entryStyle = input.entry_style || "market";
+  const priceAtPropose = input.price_at_propose ?? null;
+  const entryDistancePips = input.entry_distance_pips
+    ?? (priceAtPropose != null ? distanceFromEntryPips({ entry }, priceAtPropose) : null);
+
   const setup = {
     id,
     symbol: config.market.displayName,
@@ -157,9 +170,12 @@ export function createSetup(input) {
     strategy_id: candidate.strategy_id,
     mode: mode.id,
     session: input.session || null,
-    status: "active",
+    entry_style: entryStyle,
+    price_at_propose: priceAtPropose,
+    entry_distance_pips: entryDistancePips,
+    status: entryStyle === "limit" ? "proposed" : "active",
     proposed_at: new Date().toISOString(),
-    activated_at: new Date().toISOString(),
+    activated_at: entryStyle === "limit" ? null : new Date().toISOString(),
     resolved_at: null,
     outcome: null,
     pnl_pips: null,
@@ -209,6 +225,7 @@ export function resolveSetup(id, outcome, extra = {}) {
   setup.resolved_at = new Date().toISOString();
   setup.pnl_pips = extra.pnl_pips ?? setup.pnl_pips;
   setup.remaining_pct = extra.remaining_pct ?? setup.remaining_pct;
+  if (extra.stale_distance_pips != null) setup.stale_distance_pips = extra.stale_distance_pips;
   if (extra.partial_filled) setup.partial_filled = extra.partial_filled;
   save(data);
   return setup;
@@ -254,7 +271,8 @@ export function getSetupsSummary() {
   if (!open.length) return "No open setups.";
   return open.map((s, i) => {
     const tps = (s.tp_levels || []).map((t) => `TP${t.level}@${t.price}(${t.status})`).join(", ");
-    return `${i + 1}. [${s.status}] ${s.side.toUpperCase()} ${s.symbol} entry ${s.entry} SL ${s.sl} | ${tps || `TP ${s.tp}`} | conf ${s.confidence}% | ${s.id}`;
+    const style = s.entry_style ? ` ${s.entry_style}` : "";
+    return `${i + 1}. [${s.status}${style}] ${s.side.toUpperCase()} ${s.symbol} entry ${s.entry} SL ${s.sl} | ${tps || `TP ${s.tp}`} | conf ${s.confidence}% | ${s.id}`;
   }).join("\n");
 }
 
@@ -275,6 +293,20 @@ export function expireStaleSetups(maxAgeMin) {
   }
   if (count) save(data);
   return count;
+}
+
+/** Expire limit setups when price drifts too far without fill. Returns resolved setups. */
+export function expireStaleByDistance(open, price, mode) {
+  const resolved = [];
+  for (const setup of open) {
+    if (!shouldExpireStaleByDistance(setup, price, mode)) continue;
+    const r = resolveSetup(setup.id, "stale_no_fill", {
+      pnl_pips: 0,
+      stale_distance_pips: distanceFromEntryPips(setup, price),
+    });
+    if (r) resolved.push(r);
+  }
+  return resolved;
 }
 
 export function persistSetup(setup) {

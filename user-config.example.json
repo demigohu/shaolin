@@ -22,6 +22,8 @@
       "setupMaxAgeMin": 90,
       "entryZonePips": 3,
       "maxSlPips": 40,
+      "maxStaleDistancePips": 15,
+      "maxLimitEntryPips": 25,
       "minConfidence": 65,
       "minRrRatio": 1.2,
       "combinedTimeframe": "5m",
@@ -69,10 +71,18 @@
   "screening": {
     "maxSetupsPerDay": 8,
     "newsBlackoutMinutes": 0,
-    "nearTpSlAlertPct": 80
+    "nearTpSlAlertPct": 80,
+    "requireEntryNearPrice": true,
+    "maxEntrySlippagePips": 3,
+    "maxLimitEntryPips": 25,
+    "maxStaleDistancePips": 15
   },
   "management": {
-    "breakevenAlertAfterTp1": true
+    "breakevenAlertAfterTp1": true,
+    "fastPollEnabled": true,
+    "fastPollSec": 45,
+    "priceStreamTelegram": true,
+    "priceStreamEditMinSec": 15
   },
   "notifications": {
     "enabled": true,

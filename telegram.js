@@ -86,7 +86,34 @@ export async function sendMessage(text, chatId = null) {
     log("telegram_error", JSON.stringify(body).slice(0, 500));
     return { ok: false, error: body };
   }
-  return body;
+  return { ok: true, result: body.result };
+}
+
+export async function editMessage(text, messageId, chatId = null) {
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  const targetChatId = chatId ?? process.env.TELEGRAM_CHAT_ID?.trim();
+
+  if (!token || !targetChatId || !messageId) {
+    return { ok: false, skipped: true, reason: "telegram_not_configured" };
+  }
+
+  const url = `https://api.telegram.org/bot${token}/editMessageText`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: targetChatId,
+      message_id: messageId,
+      text: text.slice(0, 4000),
+    }),
+  });
+
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.ok === false) {
+    log("telegram_error", `editMessage: ${JSON.stringify(body).slice(0, 300)}`);
+    return { ok: false, error: body };
+  }
+  return { ok: true, result: body.result };
 }
 
 async function deleteWebhook() {

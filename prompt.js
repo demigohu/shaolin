@@ -68,6 +68,12 @@ HARD RULES:
 - SL max ${maxSl ?? 40} pips on ${mode.combinedTimeframe} structure (not Daily BB).
 - Min confidence ${mode.minConfidence}%, min RR ${mode.minRrRatio}.
 
+ENTRY STYLE (propose_setup.entry_style):
+- "market" — entry must be within ${mode.entryZonePips ?? 3}p of LIVE price (immediate manual entry on MT5).
+- "limit" — for fib_retrace / RTO: entry at retrace level; bot waits until price enters zone. Max ${mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25}p from current price.
+- Do NOT propose market entry far from price — use limit or WATCH.
+- If price already passed the level, WATCH for new structure — do not chase.
+
 Session UTC: ${session} | AMD: ${getAMDPhase()} | SMC window: ${isSMCTradingWindow() ? "open" : "closed"}
 
 ${config.darwin?.enabled !== false ? getWeightsSummary() : ""}

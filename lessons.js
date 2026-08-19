@@ -44,6 +44,9 @@ export function recordSetupOutcome(setup) {
     setup_id: setup.id,
     side: setup.side,
     mode: setup.mode,
+    setup_type: setup.setup_type || null,
+    entry_style: setup.entry_style || null,
+    entry_distance_pips: setup.entry_distance_pips ?? null,
     outcome: setup.outcome,
     pnl_pips: setup.pnl_pips,
     max_rr_reached: setup.max_rr_reached,
@@ -85,15 +88,37 @@ export function recordSetupOutcome(setup) {
 }
 
 function deriveLesson(setup) {
-  const win = setup.outcome?.includes("tp");
   const mode = setup.mode || "unknown";
-  if (win) return `[WORKED @ ${mode}] ${setup.side} setup ${setup.id}: ${setup.outcome} (+${setup.pnl_pips ?? 0} pips)`;
-  if (setup.outcome === "sl_hit") return `[FAILED @ ${mode}] ${setup.side} stopped out (${setup.pnl_pips ?? 0} pips)`;
-  if (setup.outcome === "expired") return `[AVOID @ ${mode}] Setup expired without activation`;
+  const type = setup.setup_type || "unknown";
+  const style = setup.entry_style || "?";
+  const dist = setup.entry_distance_pips;
+  const rsi = setup.screening_snapshot?.rsi;
+  const rsiNote = typeof rsi === "number" ? ` RSI ${rsi}` : "";
+  const distNote = dist != null ? ` entry ${dist}p from price at propose` : "";
+  const conf = setup.confluence_factors?.length
+    ? ` [${setup.confluence_factors.join(", ")}]`
+    : "";
+
+  const win = setup.outcome?.includes("tp");
+  if (win) {
+    return `[WORKED @ ${mode}] ${type} ${style} ${setup.side}${conf}${distNote}${rsiNote}: ${setup.outcome} (+${setup.pnl_pips ?? 0}p)`;
+  }
+  if (setup.outcome === "sl_hit" || setup.outcome === "tp_partial_then_sl") {
+    return `[FAILED @ ${mode}] ${type} ${style} ${setup.side}${conf}${distNote}${rsiNote}: stopped (${setup.pnl_pips ?? 0}p)`;
+  }
+  if (setup.outcome === "stale_no_fill") {
+    return `[AVOID @ ${mode}] ${type} limit${distNote} — price never reached entry (stale ${setup.stale_distance_pips ?? "?"}p away)`;
+  }
+  if (setup.outcome === "invalidated_pre_fill") {
+    return `[AVOID @ ${mode}] ${type} limit ${setup.side} — SL hit before entry zone filled`;
+  }
+  if (setup.outcome === "expired") {
+    return `[AVOID @ ${mode}] ${type} expired without fill — entry was likely too late or too far`;
+  }
   return null;
 }
 
-export function getLessonsForPrompt(limit = 5) {
+export function getLessonsForPrompt(limit = 8) {
   const data = load();
   return (data.lessons || []).slice(0, limit).map((l) => l.rule).join("\n") || "No lessons yet.";
 }

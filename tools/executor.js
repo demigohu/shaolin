@@ -12,6 +12,7 @@ import {
   extractSignalsFromCombined,
 } from "../signal-tracker.js";
 import { buildSMCContext, validateSMCSetup, getLastSMCContext, formatSMCForPrompt } from "../smc.js";
+import { resolveProposePrice, validateProposedEntry } from "./setup-gates.js";
 import * as market from "./market.js";
 import * as backtest from "./backtest.js";
 
@@ -60,7 +61,7 @@ const toolMap = {
       return { success: false, error: error.message };
     }
   },
-  propose_setup: (args) => {
+  propose_setup: async (args) => {
     const strategyId = args.strategy_id || getActiveStrategy().id;
     if (config.strategy.requireBacktestApproval && !isStrategyApproved(strategyId)) {
       return {
@@ -117,12 +118,28 @@ const toolMap = {
       };
     }
 
+    const proposePrice = await resolveProposePrice(market);
+    const entryCheck = validateProposedEntry(args, proposePrice, mode);
+    if (!entryCheck.ok) {
+      return {
+        success: false,
+        blocked: true,
+        reason: entryCheck.reason,
+        message: entryCheck.message,
+        price_at_propose: entryCheck.price_at_propose,
+        entry_distance_pips: entryCheck.distPips,
+      };
+    }
+
     const result = createSetup({
       ...args,
       setup_type: smcCheck.setup_type || args.setup_type,
       confluence_factors: smcCheck.confluence || args.confluence_factors,
       session: getCurrentSession(),
       screening_snapshot: screeningSnapshot,
+      entry_style: entryCheck.entry_style,
+      price_at_propose: entryCheck.price_at_propose,
+      entry_distance_pips: entryCheck.distPips,
     });
     if (result.skipped) {
       const extra = result.reason === "thesis_cooldown"

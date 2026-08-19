@@ -80,8 +80,9 @@ export function formatSetupStatus(setup, price) {
   const entry = setup.entry;
   const sl = setup.sl;
   const pip = config.broker.pipSize || 0.1;
+  const waiting = setup.status === "proposed" && setup.entry_style === "limit";
   const risk = Math.abs(entry - sl) || pip;
-  const rr = side === "long" ? (price - entry) / risk : (entry - price) / risk;
+  const rr = waiting ? null : (side === "long" ? (price - entry) / risk : (entry - price) / risk);
   const distEntryPips = toPips(Math.abs(price - entry));
   const distSlPips = toPips(Math.abs(price - sl));
 
@@ -91,23 +92,34 @@ export function formatSetupStatus(setup, price) {
     return `  ${icon} TP${tp.level} ${tp.price} (${dist}p away)`;
   });
 
-  return [
-    `${setup.side.toUpperCase()} \`${setup.id}\``,
-    `  Entry ${entry} (${distEntryPips}p ${price >= entry ? "above" : "below"})`,
-    `  SL ${sl} (${distSlPips}p away) | RR now ${rr.toFixed(2)}`,
-    ...tpLines,
-  ].join("\n");
+  const lines = [
+    `${setup.side.toUpperCase()} \`${setup.id}\`${setup.entry_style ? ` [${setup.entry_style}]` : ""}`,
+  ];
+  if (waiting) {
+    lines.push(`  ⏳ LIMIT waiting — entry ${entry} (${distEntryPips}p away)`);
+  } else {
+    lines.push(`  Entry ${entry} (${distEntryPips}p ${price >= entry ? "above" : "below"})`);
+    lines.push(`  SL ${sl} (${distSlPips}p away) | RR now ${rr?.toFixed(2) ?? "?"}`);
+  }
+  lines.push(...tpLines);
+  return lines.join("\n");
 }
 
 export function formatSetupAlert(setup) {
   const tps = (setup.tp_levels || [])
     .map((t) => `  TP${t.level}: ${formatPriceDual(t.price)} — close ${t.close_pct}%`)
     .join("\n");
+  const styleLine = setup.entry_style === "limit"
+    ? `Entry style: LIMIT — waiting for price @ ${formatPriceDual(setup.entry)} (${setup.entry_distance_pips ?? "?"}p from propose)`
+    : setup.entry_style === "market"
+      ? `Entry style: MARKET — enter near ${formatPriceDual(setup.entry)} now`
+      : null;
   return [
     "🥋 SHAOLIN SETUP",
     "━━━━━━━━━━━━━━━",
     `${setup.symbol} ${setup.side.toUpperCase()} | ${setup.mode}`,
     setup.setup_type ? `Type: ${setup.setup_type}` : null,
+    styleLine,
     setup.confluence_factors?.length ? `Confluence: ${setup.confluence_factors.join(", ")}` : null,
     "",
     `Entry  ${formatPriceDual(setup.entry)}`,
@@ -142,5 +154,20 @@ export function formatScreeningDigest({ action, summary, smc, openCount = 0 }) {
   }
   if (openCount > 0) lines.push(`Open setups: ${openCount} — screening skipped for new entries`);
   if (summary) lines.push("", summary.slice(0, 600));
+  return lines.join("\n").trim();
+}
+
+export function formatPriceStream(open, price) {
+  const lines = [
+    "📡 SHAOLIN — Live monitor",
+    `Price: ${formatPriceDual(price)} | ${new Date().toISOString().slice(11, 19)} UTC`,
+    `Fast poll ${config.management?.fastPollSec ?? 45}s`,
+    "",
+  ];
+  for (const setup of open) {
+    lines.push(formatSetupStatus(setup, price));
+    lines.push("");
+  }
+  lines.push("_Updates in-place. TP/SL alerts sent separately._");
   return lines.join("\n").trim();
 }

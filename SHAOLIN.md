@@ -40,7 +40,11 @@ XAUUSD agent: screening → auto-log setup → monitor → lessons.
 
 ## Setup lifecycle
 
-`proposed` → (price in entry zone) → `active` → `resolved` (tp_*, sl_hit, expired, invalidated)
+`proposed` (limit entry) → price in entry zone → `active` → `resolved` (tp_*, sl_hit, stale_no_fill, expired, invalidated)
+
+`market` setups → `active` immediately if entry within slippage of live price.
+
+Fast management polls every `management.fastPollSec` (default 45s) while setups are open; Telegram live monitor edits in-place.
 
 Thesis dedup: same side + entry/SL fingerprint + entry zone → skip duplicate.
 

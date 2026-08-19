@@ -7,6 +7,7 @@ import { getActiveMode, getModeIntervals, isSessionAllowed, switchMode } from ".
 import { appendScreeningDecision } from "./screening-log.js";
 import {
   expireStaleSetups,
+  expireStaleByDistance,
   getOpenSetups,
   getSetupsSummary,
   markTpLevelHit,
@@ -14,8 +15,11 @@ import {
   cancelSetup,
   cancelAllOpenSetups,
   resolveSetup,
+  isInEntryZone,
+  shouldInvalidatePreFill,
 } from "./setups.js";
 import { recordSetupOutcome } from "./lessons.js";
+import { updatePriceStream, clearPriceStream, resetStreamCooldown } from "./price-stream.js";
 import {
   formatSetupAlert,
   shouldNotifyTelegram,
@@ -41,6 +45,28 @@ let _managementBusy = false;
 let _mgmtCycleCount = 0;
 let _screenCycleCount = 0;
 let cronTasks = [];
+let fastMgmtTimer = null;
+
+export function syncFastManagementTimer() {
+  if (fastMgmtTimer) {
+    clearInterval(fastMgmtTimer);
+    fastMgmtTimer = null;
+  }
+
+  const open = getOpenSetups();
+  if (!open.length || config.management?.fastPollEnabled === false) {
+    clearPriceStream().catch((e) => log("price_stream_error", e.message));
+    return;
+  }
+
+  const sec = config.management?.fastPollSec ?? 45;
+  fastMgmtTimer = setInterval(() => {
+    runManagementCycle({ silent: true, streamUpdate: true }).catch((e) => log("cron_error", e.message));
+  }, sec * 1000);
+
+  log("cron", `Fast management every ${sec}s (${open.length} open setup(s))`);
+  resetStreamCooldown();
+}
 
 function extractLastSetupFromMessages(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -162,7 +188,8 @@ export async function runScreeningCycle({ silent = false } = {}) {
         metrics: { confidence: setup.confidence, rr: setup.rr_ratio },
       });
       await sendMessage(formatSetupAlert(setup));
-      log("screen", `Setup logged: ${setup.id}`);
+      log("screen", `Setup logged: ${setup.id} [${setup.entry_style || "market"}]`);
+      syncFastManagementTimer();
     } else {
       const action = /AVOID/i.test(content) ? "AVOID" : "WATCH";
       appendScreeningDecision({ action, summary: content?.slice(0, 200), reason: content?.slice(0, 500) });
@@ -192,18 +219,21 @@ export async function runScreeningCycle({ silent = false } = {}) {
 }
 
 
-export async function runManagementCycle({ silent = false, forceDigest = false } = {}) {
+export async function runManagementCycle({ silent = false, forceDigest = false, streamUpdate = false } = {}) {
   if (_managementBusy) return null;
   _managementBusy = true;
   _mgmtCycleCount += 1;
   const mode = getActiveMode();
 
   try {
-    log("cron", "Management cycle");
+    log("cron", streamUpdate ? "Management cycle [fast]" : "Management cycle");
     expireStaleSetups(mode.setupMaxAgeMin);
 
-    const open = getOpenSetups();
-    if (!open.length) return "No open setups";
+    let open = getOpenSetups();
+    if (!open.length) {
+      syncFastManagementTimer();
+      return "No open setups";
+    }
 
     let quote;
     try {
@@ -233,19 +263,41 @@ export async function runManagementCycle({ silent = false, forceDigest = false }
     }
     updateAsianRange(price);
 
+    for (const stale of expireStaleByDistance(open, price, mode)) {
+      recordSetupOutcome(stale);
+    }
+    open = getOpenSetups();
+
     const events = [];
 
     for (const setup of open) {
       const side = setup.side;
       const entry = setup.entry;
       const sl = setup.sl;
-      const slHit = side === "long" ? price <= sl : price >= sl;
 
-      // Legacy setups may still be "proposed" — monitor TP/SL immediately, no activation alert.
       if (setup.status === "proposed") {
-        setup.status = "active";
-        setup.activated_at = setup.activated_at || new Date().toISOString();
+        if (shouldInvalidatePreFill(setup, price)) {
+          const resolved = resolveSetup(setup.id, "invalidated_pre_fill", { pnl_pips: 0 });
+          if (resolved) recordSetupOutcome(resolved);
+          events.push(`❌ SL before fill ${setup.id} @ ${price} (limit never activated)`);
+          continue;
+        }
+        if (setup.entry_style === "limit") {
+          if (isInEntryZone(setup, price, mode.entryZonePips)) {
+            setup.status = "active";
+            setup.activated_at = new Date().toISOString();
+            events.push(`✅ ENTRY ZONE ${setup.id} — limit filled @ ${price}`);
+          } else {
+            persistSetup(setup);
+            continue;
+          }
+        } else {
+          setup.status = "active";
+          setup.activated_at = setup.activated_at || new Date().toISOString();
+        }
       }
+
+      const slHit = side === "long" ? price <= sl : price >= sl;
 
       const risk = Math.abs(entry - sl);
       if (risk > 0) {
@@ -299,8 +351,13 @@ export async function runManagementCycle({ silent = false, forceDigest = false }
     const digestEvery = config.notifications?.digestEveryManagementCycles ?? 5;
     const notifyMgmt = config.notifications?.enabled !== false && !silent;
     const sendDigest = notifyMgmt && config.notifications?.notifyManagementDigest !== false
+      && !streamUpdate
       && (forceDigest
         || (stillOpen.length && _mgmtCycleCount % digestEvery === 0 && shouldNotifyTelegram("management_digest")));
+
+    if (streamUpdate && stillOpen.length) {
+      await updatePriceStream(stillOpen, price);
+    }
 
     if (notifyMgmt) {
       if (forceDigest && stillOpen.length) {
@@ -315,6 +372,7 @@ export async function runManagementCycle({ silent = false, forceDigest = false }
     if (forceDigest && stillOpen.length) {
       return formatManagementDigest(stillOpen, price, events);
     }
+    if (!stillOpen.length) syncFastManagementTimer();
     return events.join("\n") || (stillOpen.length ? formatManagementDigest(stillOpen, price) : "Management OK");
   } finally {
     _managementBusy = false;
@@ -336,6 +394,7 @@ export function startCronJobs() {
   }));
 
   log("cron", `Started — screening ${screeningIntervalMin}m, management ${managementIntervalMin}m [${config.activeMode}]`);
+  syncFastManagementTimer();
 }
 
 async function telegramHandler(msg) {
@@ -521,6 +580,7 @@ if (isMain) {
   runScreeningCycle({ silent: true }).catch((e) => log("startup_error", e.message));
 
   process.on("SIGINT", async () => {
+    if (fastMgmtTimer) clearInterval(fastMgmtTimer);
     await closeMcp();
     process.exit(0);
   });

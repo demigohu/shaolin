@@ -83,6 +83,11 @@ export const tools = [
           bias: { type: "string" },
           reason: { type: "string" },
           thesis_id: { type: "string", description: "Short thesis identifier for dedup" },
+          entry_style: {
+            type: "string",
+            enum: ["market", "limit"],
+            description: "market = enter now near live price; limit = wait for retrace to entry level",
+          },
           risks: { type: "array", items: { type: "string" } },
           screening_snapshot: {
             type: "object",
