@@ -1,6 +1,38 @@
 import { config } from "../config.js";
 import { callMcpTool } from "./mcp-client.js";
 import { getActiveMode } from "../modes.js";
+import { log } from "../logger.js";
+
+/** TradingView coin_analysis puts live price under price_data, not top-level. */
+export function extractPriceFromAnalysis(analysis) {
+  if (!analysis || analysis.error) return null;
+  const pd = analysis.price_data || {};
+  for (const candidate of [
+    pd.current_price,
+    pd.close,
+    analysis.price,
+    analysis.close,
+    analysis.indicators?.close,
+  ]) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+export function extractPriceFromYahoo(quote) {
+  if (!quote || quote.error) return null;
+  for (const candidate of [
+    quote.price,
+    quote.regularMarketPrice,
+    quote.last,
+    quote.close,
+  ]) {
+    const n = Number(candidate);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
 
 function biasFromAnalysis(analysis) {
   if (!analysis || analysis.error) return { bias: "Unknown", score: 0 };
@@ -41,7 +73,7 @@ export async function getScalpIntradayMtf() {
         score,
         rsi,
         signal,
-        price: analysis?.price ?? analysis?.close ?? null,
+        price: extractPriceFromAnalysis(analysis),
       };
     } catch (error) {
       tfResults[tf] = { error: error.message };
@@ -104,33 +136,55 @@ export async function getXauusdPrice() {
   });
 }
 
-/** Management TP/SL — prefer OANDA spot (same feed as setup levels), fallback Yahoo GC=F. */
+/** Management TP/SL — OANDA/TradingView first, Yahoo GC=F fallback. */
 export async function getManagementPrice() {
-  try {
-    const analysis = await callMcpTool("coin_analysis", {
-      symbol: config.market.dataSymbol,
-      exchange: config.market.dataExchange,
-      timeframe: "5m",
-    });
-    const price = analysis?.price ?? analysis?.close ?? analysis?.indicators?.close;
-    if (Number.isFinite(Number(price))) {
-      return {
-        price: Number(price),
-        source: "oanda",
-        symbol: `${config.market.dataExchange}:${config.market.dataSymbol}`,
-      };
+  const errors = [];
+
+  for (const tf of ["5m", "15m", "1h"]) {
+    try {
+      const analysis = await callMcpTool("coin_analysis", {
+        symbol: config.market.dataSymbol,
+        exchange: config.market.dataExchange,
+        timeframe: tf,
+      });
+      if (analysis?.error) {
+        errors.push(`oanda/${tf}: ${analysis.error}`);
+        continue;
+      }
+      const price = extractPriceFromAnalysis(analysis);
+      if (price != null) {
+        return {
+          price,
+          source: "oanda",
+          timeframe: tf,
+          symbol: `${config.market.dataExchange}:${config.market.dataSymbol}`,
+        };
+      }
+      errors.push(`oanda/${tf}: no price in response`);
+    } catch (error) {
+      errors.push(`oanda/${tf}: ${error.message}`);
     }
-  } catch {
-    /* fallback below */
   }
 
-  const quote = await getXauusdPrice();
-  const price = quote?.price ?? quote?.regularMarketPrice ?? quote?.last ?? quote?.close;
-  return {
-    price: Number.isFinite(Number(price)) ? Number(price) : null,
-    source: "yahoo",
-    symbol: config.market.yahooSymbol,
-  };
+  try {
+    const quote = await getXauusdPrice();
+    const price = extractPriceFromYahoo(quote);
+    if (price != null) {
+      return {
+        price,
+        source: "yahoo",
+        symbol: config.market.yahooSymbol,
+        warnings: errors,
+      };
+    }
+    if (quote?.error) errors.push(`yahoo: ${quote.error}`);
+    else errors.push("yahoo: no price in response");
+  } catch (error) {
+    errors.push(`yahoo: ${error.message}`);
+  }
+
+  log("mgmt_warn", `All price sources failed: ${errors.join(" | ")}`);
+  return { price: null, source: null, errors };
 }
 
 export async function getGoldNews(limit = 5) {

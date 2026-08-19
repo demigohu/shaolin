@@ -164,11 +164,21 @@ export async function runManagementCycle({ silent = false, forceDigest = false }
 
     const price = quote?.price;
     if (price == null) {
-      log("mgmt_warn", "No price in quote");
-      return null;
+      const detail = quote?.errors?.slice(-2).join(" | ") || "MCP + Yahoo returned no price";
+      log("mgmt_warn", `No price in quote — ${detail}`);
+      return [
+        `⚠️ Management: cannot fetch price (${open.length} open setup(s)).`,
+        detail,
+        "",
+        getSetupsSummary(),
+        "",
+        "TP/SL alerts paused until price feed recovers. Retry /manage in 1–3 min.",
+      ].join("\n");
     }
     if (quote.source === "yahoo") {
-      log("mgmt_warn", "Using Yahoo GC=F for management — may mismatch OANDA setup levels");
+      log("mgmt_warn", `Using Yahoo GC=F for management — may differ slightly from OANDA levels`);
+    } else {
+      log("mgmt", `Price ${price} from ${quote.source} ${quote.timeframe || ""}`.trim());
     }
 
     const events = [];
@@ -370,8 +380,13 @@ async function telegramHandler(msg) {
   }
   if (text === "/manage") {
     await reply("Running management...");
+    const open = getOpenSetups();
+    if (!open.length) {
+      await reply("No open setups.");
+      return;
+    }
     const result = await runManagementCycle({ silent: true, forceDigest: true });
-    await reply(result?.slice(0, 4000) || "No open setups.");
+    await reply(result?.slice(0, 4000) || "Management failed — check logs/pm2-out.log");
     return;
   }
   if (text === "/weights") {
