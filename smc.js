@@ -110,11 +110,11 @@ function detectLiquidityEvents(price, asian, daily) {
     }
   }
 
-  if (daily?.pdh != null && price > daily.pdh) {
+  if (price != null && daily?.pdh != null && price > daily.pdh) {
     events.push("bsl_raid_pdh");
     hints.push("Above PDH — BSL taken, reversal down possible");
   }
-  if (daily?.pdl != null && price < daily.pdl) {
+  if (price != null && daily?.pdl != null && price < daily.pdl) {
     events.push("ssl_raid_pdl");
     hints.push("Below PDL — SSL taken, reversal up possible");
   }
@@ -139,15 +139,19 @@ function suggestPlaybooks(liquidityEvents, amdPhase, h1Trend) {
 }
 
 export async function buildSMCContext({ updateRange = true } = {}) {
-  const [daily, h4, h1, m15, m5] = await Promise.all([
+  // Warm up MCP session before parallel fetches (avoids "before initialization" race).
+  const m5 = await fetchTf("5m");
+  const [daily, h4, h1, m15] = await Promise.all([
     fetchTf("1D"),
     fetchTf("4h"),
     fetchTf("1h"),
     fetchTf("15m"),
-    fetchTf("5m"),
   ]);
 
-  const price = extractPriceFromAnalysis(m5) ?? extractPriceFromAnalysis(m15);
+  const price = extractPriceFromAnalysis(m5)
+    ?? extractPriceFromAnalysis(m15)
+    ?? extractPriceFromAnalysis(h1)
+    ?? extractPriceFromAnalysis(daily);
   if (updateRange && price != null) updateAsianRange(price);
 
   let asian = getAsianRange();

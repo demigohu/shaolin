@@ -5,6 +5,7 @@ import { getSetupsSummary } from "./setups.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
 import { getScreeningSummary } from "./screening-log.js";
 import { getSetupMemorySummary } from "./setup-memory.js";
+import { getWeightsSummary } from "./signal-weights.js";
 import { formatSMCForPrompt } from "./smc.js";
 import { getAMDPhase, isSMCTradingWindow } from "./smc-sessions.js";
 
