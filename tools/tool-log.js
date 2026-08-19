@@ -10,6 +10,8 @@ export function summarizeToolResult(name, result, args = {}) {
   switch (name) {
     case "get_xauusd_mtf":
       return summarizeMtf(result);
+    case "get_smc_context":
+      return result.summary || `SMC ${result.amd_phase} price=${result.price} events=${(result.liquidity_events || []).join(",") || "none"}`;
     case "get_xauusd_combined":
       return summarizeCombined(result, args);
     case "get_xauusd_price": {
@@ -24,7 +26,7 @@ export function summarizeToolResult(name, result, args = {}) {
       if (result.skipped) return `skipped: ${result.reason}${result.existing ? ` (${result.existing})` : ""}`;
       if (result.setup) {
         const s = result.setup;
-        return `SETUP ${s.side} entry=${s.entry} sl=${s.sl} conf=${s.confidence}% id=${s.id}`;
+        return `SETUP ${s.setup_type || "?"} ${s.side} entry=${s.entry} sl=${s.sl} conf=${s.confidence}% id=${s.id}`;
       }
       return result.success === false ? `failed: ${result.reason || "unknown"}` : "propose_setup ok";
     default:

@@ -107,6 +107,8 @@ export function formatSetupAlert(setup) {
     "🥋 SHAOLIN SETUP",
     "━━━━━━━━━━━━━━━",
     `${setup.symbol} ${setup.side.toUpperCase()} | ${setup.mode}`,
+    setup.setup_type ? `Type: ${setup.setup_type}` : null,
+    setup.confluence_factors?.length ? `Confluence: ${setup.confluence_factors.join(", ")}` : null,
     "",
     `Entry  ${formatPriceDual(setup.entry)}`,
     `SL     ${formatPriceDual(setup.sl)} (${setup.sl_pips} pips)`,
@@ -124,4 +126,21 @@ export function formatSetupAlert(setup) {
 
 export function formatEventAlert(events) {
   return ["🔔 SHAOLIN ALERT", "━━━━━━━━━━━━━━━", ...events.map((e) => `• ${e}`)].join("\n");
+}
+
+export function formatScreeningDigest({ action, summary, smc, openCount = 0 }) {
+  const lines = [
+    "🔍 SHAOLIN — Screening",
+    `Action: ${action || "WATCH"} | ${new Date().toISOString().slice(11, 16)} UTC`,
+  ];
+  if (smc) {
+    lines.push(`WIB ${smc.wib} | ${smc.amd_phase} | price ${smc.price ?? "?"}`);
+    if (smc.liquidity_events?.length) lines.push(`Liquidity: ${smc.liquidity_events.join(", ")}`);
+    if (smc.suggested_setups?.length) lines.push(`Plays: ${smc.suggested_setups.join(", ")}`);
+    if (smc.fib?.in_ote_zone) lines.push("Fib: price IN OTE zone (0.618–0.72)");
+    if (smc.structure?.bms_hint) lines.push(`Structure: ${smc.structure.bms_hint}`);
+  }
+  if (openCount > 0) lines.push(`Open setups: ${openCount} — screening skipped for new entries`);
+  if (summary) lines.push("", summary.slice(0, 600));
+  return lines.join("\n").trim();
 }

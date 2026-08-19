@@ -76,13 +76,19 @@
   },
   "notifications": {
     "enabled": true,
+    "notifyScreeningDigest": true,
+    "notifyManagementDigest": true,
+    "notifyScreeningResult": false,
     "digestEveryManagementCycles": 5,
+    "digestEveryScreeningCycles": 1,
     "notifySessionSkip": false,
-    "notifyOpenSetupSkip": false,
+    "notifyOpenSetupSkip": true,
     "cooldownMin": {
       "off_session": 240,
-      "open_setup_skip": 120,
-      "management_digest": 15
+      "open_setup_skip": 15,
+      "management_digest": 15,
+      "screening_digest": 15,
+      "screen_watch": 30
     }
   },
   "llm": {
@@ -110,6 +116,14 @@
     "cooldownMinSetups": 3,
     "cooldownMaxWinRate": 25,
     "cooldownHours": 24
+  },
+  "smc": {
+    "enabled": true,
+    "minConfluence": 2,
+    "requireTradingWindow": true,
+    "blockTrendFollowAtLiquidity": true,
+    "bootstrapAsianRange": true,
+    "asianRangeMaxPips": 50
   },
   "telegramChatId": null
 }

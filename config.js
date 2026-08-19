@@ -97,13 +97,19 @@ export const config = {
   },
   notifications: {
     enabled: u.notifications?.enabled !== false,
-    digestEveryManagementCycles: u.notifications?.digestEveryManagementCycles ?? 5,
+    notifyScreeningDigest: u.notifications?.notifyScreeningDigest ?? true,
+    notifyManagementDigest: u.notifications?.notifyManagementDigest ?? true,
+    notifyScreeningResult: u.notifications?.notifyScreeningResult ?? true,
+    notifyOpenSetupSkip: u.notifications?.notifyOpenSetupSkip ?? true,
     notifySessionSkip: u.notifications?.notifySessionSkip ?? false,
-    notifyOpenSetupSkip: u.notifications?.notifyOpenSetupSkip ?? false,
+    digestEveryManagementCycles: u.notifications?.digestEveryManagementCycles ?? 5,
+    digestEveryScreeningCycles: u.notifications?.digestEveryScreeningCycles ?? 1,
     cooldownMin: {
       off_session: u.notifications?.cooldownMin?.off_session ?? 240,
-      open_setup_skip: u.notifications?.cooldownMin?.open_setup_skip ?? 120,
+      open_setup_skip: u.notifications?.cooldownMin?.open_setup_skip ?? 15,
       management_digest: u.notifications?.cooldownMin?.management_digest ?? 15,
+      screening_digest: u.notifications?.cooldownMin?.screening_digest ?? 15,
+      screen_watch: u.notifications?.cooldownMin?.screen_watch ?? 30,
       ...(u.notifications?.cooldownMin || {}),
     },
   },
@@ -136,6 +142,14 @@ export const config = {
     cooldownMinSetups: u.setupMemory?.cooldownMinSetups ?? 3,
     cooldownMaxWinRate: u.setupMemory?.cooldownMaxWinRate ?? 25,
     cooldownHours: u.setupMemory?.cooldownHours ?? 24,
+  },
+  smc: {
+    enabled: u.smc?.enabled !== false,
+    minConfluence: u.smc?.minConfluence ?? 2,
+    requireTradingWindow: u.smc?.requireTradingWindow ?? true,
+    blockTrendFollowAtLiquidity: u.smc?.blockTrendFollowAtLiquidity !== false,
+    bootstrapAsianRange: u.smc?.bootstrapAsianRange !== false,
+    asianRangeMaxPips: u.smc?.asianRangeMaxPips ?? 50,
   },
 };
 

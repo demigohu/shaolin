@@ -7,7 +7,7 @@ import { log } from "./logger.js";
 import { config } from "./config.js";
 
 const SCREENER_TOOLS = new Set([
-  "get_xauusd_mtf", "get_xauusd_combined", "get_xauusd_price", "get_gold_news",
+  "get_smc_context", "get_xauusd_mtf", "get_xauusd_combined", "get_xauusd_price", "get_gold_news",
   "get_market_context", "propose_setup",
 ]);
 const MANAGER_TOOLS = new Set(["get_xauusd_price", "get_active_setups", "get_xauusd_combined"]);

@@ -1,0 +1,16 @@
+{
+  "decisions": [
+    {
+      "id": "scr_1786972645888_gviad3",
+      "ts": "2026-08-17T13:17:25.888Z",
+      "type": "screen",
+      "actor": "SCREENER",
+      "action": "AVOID",
+      "setup_id": null,
+      "summary": "**Action:** AVOID **Reason:** The multi‑timeframe analysis shows a mixed/ranging market with low alignment confidence (net score 0, divergent daily & hourly frames) and a “HOLD/NO TRADE” recommenda",
+      "reason": "**Action:** AVOID **Reason:** The multi‑timeframe analysis shows a mixed/ranging market with low alignment confidence (net score 0, divergent daily & hourly frames) and a “HOLD/NO TRADE” recommendation. Although the 15‑minute combined technical view gives a high‑confidence sell signal, the overall confidence is diluted by the MTF mismatch, keeping the composite confidence below the required 65 % threshold. Consequently, the setup does not satisfy the minimum confidence and risk‑reward criteri",
+      "risks": [],
+      "metrics": {}
+    }
+  ]
+}

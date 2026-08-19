@@ -11,6 +11,7 @@ import {
   extractSignalsFromMtf,
   extractSignalsFromCombined,
 } from "../signal-tracker.js";
+import { buildSMCContext, validateSMCSetup, getLastSMCContext, formatSMCForPrompt } from "../smc.js";
 import * as market from "./market.js";
 import * as backtest from "./backtest.js";
 
@@ -30,6 +31,10 @@ const toolMap = {
   get_xauusd_price: () => market.getXauusdPrice(),
   get_gold_news: (args) => market.getGoldNews(args?.limit ?? 5),
   get_market_context: () => market.getMarketSnapshot(),
+  get_smc_context: async () => {
+    const ctx = await buildSMCContext();
+    return { ...ctx, summary: formatSMCForPrompt(ctx) };
+  },
   get_active_setups: () => ({ setups: getOpenSetups() }),
   get_recent_screening: (args) => ({ decisions: getRecentScreeningDecisions(args?.limit ?? 10) }),
   backtest_strategy: (args) => backtest.runBacktest(args),
@@ -99,8 +104,23 @@ const toolMap = {
       }
     }
 
+    const smcCheck = validateSMCSetup(
+      { ...args, screening_snapshot: screeningSnapshot },
+      getLastSMCContext(),
+    );
+    if (!smcCheck.ok) {
+      return {
+        success: false,
+        blocked: true,
+        reason: smcCheck.reason,
+        message: smcCheck.message,
+      };
+    }
+
     const result = createSetup({
       ...args,
+      setup_type: smcCheck.setup_type || args.setup_type,
+      confluence_factors: smcCheck.confluence || args.confluence_factors,
       session: getCurrentSession(),
       screening_snapshot: screeningSnapshot,
     });

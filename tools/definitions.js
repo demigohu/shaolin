@@ -52,8 +52,16 @@ export const tools = [
   {
     type: "function",
     function: {
+      name: "get_smc_context",
+      description: "SMC framework: AMD session phase, Asian range, PDH/PDL, liquidity sweeps (BSL/SSL), HTF bias, suggested setup types.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "propose_setup",
-      description: "Log a trade setup (entry, SL, TP levels). ONLY call when action is SETUP. Never claim execution.",
+      description: "Log SMC setup. Requires setup_type + confluence_factors (min 2). Entry on RTO/fib retrace — not chase.",
       parameters: {
         type: "object",
         properties: {
@@ -61,6 +69,17 @@ export const tools = [
           entry: { type: "number" },
           sl: { type: "number" },
           confidence: { type: "number", description: "0-100" },
+          setup_type: {
+            type: "string",
+            enum: ["turtle_soup_long", "turtle_soup_short", "sh_bms_rto", "sms_bms_rto", "amd_distribution", "fib_retrace"],
+          },
+          confluence_factors: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["htf_bias", "ltf_structure", "liquidity_sweep", "order_block_rto", "fib_ote", "london_open", "ny_open", "asian_range", "session_amd", "news_catalyst"],
+            },
+          },
           bias: { type: "string" },
           reason: { type: "string" },
           thesis_id: { type: "string", description: "Short thesis identifier for dedup" },
@@ -70,7 +89,7 @@ export const tools = [
             description: "Optional screening signals (mtf_net_score, rsi, news_sentiment_score, etc.)",
           },
         },
-        required: ["side", "entry", "sl", "confidence", "reason"],
+        required: ["side", "entry", "sl", "confidence", "reason", "setup_type", "confluence_factors"],
         additionalProperties: false,
       },
     },

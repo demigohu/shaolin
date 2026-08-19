@@ -7,7 +7,7 @@ __pycache__/
 .envrypt
 user-config.json
 setups.json
-screening-log.json
+smc-state.json
 lessons.json
 strategies.json
 setup-memory.json

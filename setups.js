@@ -170,6 +170,10 @@ export function createSetup(input) {
     reason: sanitize(input.reason, 500),
     risks: Array.isArray(input.risks) ? input.risks.map((r) => sanitize(r, 140)).filter(Boolean).slice(0, 6) : [],
     thesis_id: sanitize(input.thesis_id || input.reason?.slice(0, 80), 120),
+    setup_type: sanitize(input.setup_type, 40),
+    confluence_factors: Array.isArray(input.confluence_factors)
+      ? input.confluence_factors.map((c) => sanitize(c, 40)).filter(Boolean).slice(0, 8)
+      : [],
   };
 
   const data = load();

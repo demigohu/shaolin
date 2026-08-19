@@ -1,11 +1,12 @@
 import { config } from "./config.js";
-import { getActiveMode, getCurrentSession, isSessionAllowed } from "./modes.js";
+import { getActiveMode, getCurrentSession } from "./modes.js";
 import { getActiveStrategy } from "./strategies.js";
 import { getSetupsSummary } from "./setups.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
 import { getScreeningSummary } from "./screening-log.js";
 import { getSetupMemorySummary } from "./setup-memory.js";
-import { getWeightsSummary } from "./signal-weights.js";
+import { formatSMCForPrompt } from "./smc.js";
+import { getAMDPhase, isSMCTradingWindow } from "./smc-sessions.js";
 
 export function buildSystemPrompt(agentType, context = {}) {
   const mode = getActiveMode();
@@ -34,30 +35,39 @@ Active strategy: ${strategy.name} (${strategy.id})
 
   if (agentType === "SCREENER") {
     const maxSl = mode.maxSlPips;
-    const slRule = maxSl != null
-      ? `- Scalp SL max ${maxSl} pips (${(maxSl * broker.pipSize).toFixed(1)} price). Use 1m/5m structure — NOT Daily/Weekly Bollinger as SL.`
-      : "";
+    const smcEnabled = config.smc?.enabled !== false;
 
     return `${shared}
 
-ROLE: SCREENER — analyze XAUUSD and produce at most one setup per cycle.
+ROLE: SCREENER — Smart Money / Market Structure (PDF framework). At most ONE setup per cycle.
 
-OPEN SETUPS (if any listed below — do NOT call propose_setup; management handles them):
+${smcEnabled ? context.prefetchSummary || "Call get_smc_context first for AMD phase, Asian range, liquidity." : ""}
+
+OPEN SETUPS (do NOT call propose_setup if any listed):
 ${getSetupsSummary()}
 
 WORKFLOW:
-1. Call get_xauusd_mtf (intraday: ${mode.timeframes.join(" → ")}) and get_xauusd_combined on ${mode.combinedTimeframe}.
-2. Synthesize bias, key levels, and whether conditions meet min confidence/RR.
-3. If SETUP and NO open setups: call propose_setup once with tight scalp SL.
-4. If open setup exists OR not ready: WATCH or AVOID — never propose_setup.
+1. ${smcEnabled ? "Review SMC context (prefetched or get_smc_context)." : ""} Call get_xauusd_mtf + get_xauusd_combined on ${mode.combinedTimeframe}.
+2. Identify: AMD phase, liquidity sweep (BSL/SSL), BMS, SMS, OB/RTO, fib 0.5–0.72 retrace.
+3. SETUP only if ≥${config.smc?.minConfluence ?? 2} confluence factors AND valid setup_type.
+4. Entry on RTO / fib retrace — NEVER chase impulsive move after BMS.
+5. WATCH or AVOID if unclear.
 
-RSI EXTREME RULES (hard — propose_setup will be blocked):
-- Do NOT short when combined RSI < ${config.screening?.rsiNoShortBelow ?? 35} (oversold bounce risk on gold).
-- Do NOT long when combined RSI > ${config.screening?.rsiNoLongAbove ?? 65}.
-- Fully aligned bearish MTF + oversold RSI = WATCH for pullback, not blind short.
-${slRule}
+SETUP TYPES (setup_type on propose_setup):
+turtle_soup_long | turtle_soup_short | sh_bms_rto | sms_bms_rto | amd_distribution | fib_retrace
 
-Session allowed: ${isSessionAllowed(mode) ? "yes" : "no — prefer AVOID/WATCH"}
+CONFLUENCE (confluence_factors array, min ${config.smc?.minConfluence ?? 2}):
+htf_bias | liquidity_sweep | order_block_rto | fib_ote | london_open | ny_open | asian_range | session_amd | ltf_structure | news_catalyst
+
+HARD RULES:
+- SSL swept → favor LONG setups (turtle_soup_long, RTO long). Do NOT trend-short.
+- BSL swept → favor SHORT setups. Do NOT chase long.
+- Asian 07–13 WIB = range; London 14–18 = manip; NY 19–22 = distribution.
+- Scalp entries prefer London/NY open windows.
+- SL max ${maxSl ?? 40} pips on ${mode.combinedTimeframe} structure (not Daily BB).
+- Min confidence ${mode.minConfidence}%, min RR ${mode.minRrRatio}.
+
+Session UTC: ${session} | AMD: ${getAMDPhase()} | SMC window: ${isSMCTradingWindow() ? "open" : "closed"}
 
 ${config.darwin?.enabled !== false ? getWeightsSummary() : ""}
 
@@ -69,9 +79,6 @@ ${getLessonsForPrompt()}
 
 Recent screening:
 ${getScreeningSummary()}
-
-Preloaded context:
-${context.prefetchSummary || "None"}
 `.trim();
   }
 

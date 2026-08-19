@@ -23,6 +23,7 @@ import {
   formatOpenSetupSkip,
   formatManagementDigest,
   formatEventAlert,
+  formatScreeningDigest,
 } from "./notifications.js";
 import { sendMessage, startPolling, isEnabled as telegramEnabled, getTelegramStatus } from "./telegram.js";
 import { closeMcp } from "./tools/mcp-client.js";
@@ -32,11 +33,13 @@ import { isStrategyApproved, getActiveStrategy, ensureStrategyApproved, backtest
 import { compareStrategies } from "./tools/backtest.js";
 import { formatAgentStatus } from "./status.js";
 import { getWeightsSummary } from "./signal-weights.js";
-import { getSetupMemorySummary } from "./setup-memory.js";
+import { buildSMCContext, formatSMCForPrompt, getLastSMCContext } from "./smc.js";
+import { updateAsianRange } from "./smc-state.js";
 
 let _screeningBusy = false;
 let _managementBusy = false;
 let _mgmtCycleCount = 0;
+let _screenCycleCount = 0;
 let cronTasks = [];
 
 function extractLastSetupFromMessages(messages) {
@@ -54,7 +57,9 @@ function extractLastSetupFromMessages(messages) {
 export async function runScreeningCycle({ silent = false } = {}) {
   if (_screeningBusy) return null;
   _screeningBusy = true;
+  _screenCycleCount += 1;
   const mode = getActiveMode();
+  const notify = config.notifications?.enabled !== false && !silent;
 
   try {
     log("cron", `Screening cycle [${mode.id}]`);
@@ -63,7 +68,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
       const msg = `Session not allowed for ${mode.id} — skipping screening`;
       appendScreeningDecision({ action: "AVOID", summary: msg, reason: "off_session" });
       log("screen", msg);
-      if (!silent && config.notifications?.notifySessionSkip && shouldNotifyTelegram("off_session")) {
+      if (notify && config.notifications?.notifySessionSkip && shouldNotifyTelegram("off_session")) {
         await sendMessage(formatSessionSkip(mode));
       }
       return msg;
@@ -91,14 +96,45 @@ export async function runScreeningCycle({ silent = false } = {}) {
       const msg = `Open setup(s) active (${open.length}) — skipping new screening. Management monitors TP/SL every ${mode.managementIntervalMin}m.`;
       appendScreeningDecision({ action: "WATCH", summary: msg, reason: "open_setup_active" });
       log("screen", msg);
-      if (!silent && config.notifications?.notifyOpenSetupSkip && shouldNotifyTelegram("open_setup_skip")) {
+      const sendScreenDigest = notify && config.notifications?.notifyScreeningDigest
+        && _screenCycleCount % (config.notifications?.digestEveryScreeningCycles ?? 1) === 0
+        && shouldNotifyTelegram("screening_digest");
+      if (sendScreenDigest) {
+        let smc = getLastSMCContext();
+        if (!smc) {
+          try { smc = await buildSMCContext(); } catch { /* skip */ }
+        }
+        await sendMessage(formatScreeningDigest({
+          action: "WATCH",
+          summary: msg,
+          smc,
+          openCount: open.length,
+        }));
+      } else if (notify && config.notifications?.notifyOpenSetupSkip
+        && shouldNotifyTelegram("open_setup_skip")) {
         await sendMessage(formatOpenSetupSkip(open, mode));
       }
       return msg;
     }
 
     const maxSl = mode.maxSlPips ?? 40;
-    const goal = `Run XAUUSD ${mode.label} screening. Intraday TFs: ${mode.timeframes.join(", ")}. Analyze scalp MTF + combined TA on ${mode.combinedTimeframe}. If SETUP: tight SL max ${maxSl} pips, min confidence ${mode.minConfidence}%, min RR ${mode.minRrRatio}. Do NOT use Daily/Weekly Bollinger as SL. Otherwise WATCH or AVOID.`;
+
+    let smcSummary = null;
+    if (config.smc?.enabled !== false) {
+      try {
+        const ctx = await buildSMCContext();
+        smcSummary = formatSMCForPrompt(ctx);
+      } catch (error) {
+        log("smc_error", error.message);
+      }
+    }
+
+    const goal = [
+      `Run XAUUSD ${mode.label} SMC screening (Market Structure PDF).`,
+      `TFs: ${mode.timeframes.join(", ")}. Combined: ${mode.combinedTimeframe}.`,
+      `If SETUP: setup_type + ≥2 confluence_factors. SL max ${maxSl} pips. Min conf ${mode.minConfidence}%, RR ${mode.minRrRatio}.`,
+      `Prefer turtle soup / RTO / fib retrace — no trend chase after liquidity sweep.`,
+    ].join(" ");
 
     const { content, messages } = await agentLoop(
       goal,
@@ -106,6 +142,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
       "SCREENER",
       config.llm.screeningModel,
       {
+        context: { prefetchSummary: smcSummary },
         onToolStart: ({ name, args }) => {
           if (!silent && args && Object.keys(args).length) {
             log("tool", `${name}(${JSON.stringify(args)})`);
@@ -129,7 +166,21 @@ export async function runScreeningCycle({ silent = false } = {}) {
     } else {
       const action = /AVOID/i.test(content) ? "AVOID" : "WATCH";
       appendScreeningDecision({ action, summary: content?.slice(0, 200), reason: content?.slice(0, 500) });
-      if (!silent && shouldNotifyTelegram(`screen_${action}`, 30)) {
+      const smc = getLastSMCContext();
+      const digestEvery = config.notifications?.digestEveryScreeningCycles ?? 1;
+      const sendDigest = notify && config.notifications?.notifyScreeningDigest
+        && _screenCycleCount % digestEvery === 0
+        && shouldNotifyTelegram("screening_digest");
+      const sendResult = notify && config.notifications?.notifyScreeningResult
+        && shouldNotifyTelegram(`screen_${action}`, config.notifications?.cooldownMin?.screen_watch ?? 30);
+
+      if (sendDigest) {
+        await sendMessage(formatScreeningDigest({
+          action,
+          summary: content,
+          smc,
+        }));
+      } else if (sendResult) {
         await sendMessage(`🥋 Screening: ${action}\n${(content || "").slice(0, 500)}`);
       }
     }
@@ -180,6 +231,7 @@ export async function runManagementCycle({ silent = false, forceDigest = false }
     } else {
       log("mgmt", `Price ${price} from ${quote.source} ${quote.timeframe || ""}`.trim());
     }
+    updateAsianRange(price);
 
     const events = [];
 
@@ -245,10 +297,12 @@ export async function runManagementCycle({ silent = false, forceDigest = false }
 
     const stillOpen = getOpenSetups();
     const digestEvery = config.notifications?.digestEveryManagementCycles ?? 5;
-    const sendDigest = forceDigest
-      || (stillOpen.length && _mgmtCycleCount % digestEvery === 0 && shouldNotifyTelegram("management_digest"));
+    const notifyMgmt = config.notifications?.enabled !== false && !silent;
+    const sendDigest = notifyMgmt && config.notifications?.notifyManagementDigest !== false
+      && (forceDigest
+        || (stillOpen.length && _mgmtCycleCount % digestEvery === 0 && shouldNotifyTelegram("management_digest")));
 
-    if (!silent) {
+    if (notifyMgmt) {
       if (forceDigest && stillOpen.length) {
         await sendMessage(formatManagementDigest(stillOpen, price, events));
       } else if (events.length) {
@@ -274,7 +328,7 @@ export function startCronJobs() {
   const { screeningIntervalMin, managementIntervalMin } = getModeIntervals();
 
   cronTasks.push(cron.schedule(`*/${screeningIntervalMin} * * * *`, () => {
-    runScreeningCycle({ silent: true }).catch((e) => log("cron_error", e.message));
+    runScreeningCycle({ silent: false }).catch((e) => log("cron_error", e.message));
   }));
 
   cronTasks.push(cron.schedule(`*/${managementIntervalMin} * * * *`, () => {
