@@ -45,22 +45,34 @@ Active strategy: ${strategy.name} (${strategy.id})
       ? `SMC window: ${isSMCTradingWindow() ? "open" : "closed"}`
       : "window gate: OFF (any hour OK if rules met)";
 
+    const maxMarketPips = config.screening?.maxEntrySlippagePips ?? mode.entryZonePips ?? 3;
+    const maxLimitPips = mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25;
+
+    const prefetchBlock = smcEnabled && context.prefetchSummary
+      ? `${context.prefetchSummary}
+
+PREFETCH ACTIVE — SMC + MTF zones already loaded above.
+- Do NOT call get_smc_context or get_mtf_zones (duplicate fetch).
+- Start with get_xauusd_mtf + get_xauusd_combined on ${mode.combinedTimeframe}.
+- Only call get_xauusd_price if prefetch Price is "?" or null.`
+      : smcEnabled
+        ? "Call get_smc_context first, then get_xauusd_mtf + get_xauusd_combined."
+        : "Call get_mtf_zones, then get_xauusd_mtf + get_xauusd_combined.";
+
     return `${shared}
 
 ROLE: SCREENER — Smart Money / Market Structure (PDF framework). At most ONE setup per cycle.
 
-${smcEnabled ? context.prefetchSummary || "Call get_smc_context first for AMD phase, Asian range, liquidity." : ""}
+${prefetchBlock}
 
 OPEN SETUPS (do NOT call propose_setup if any listed):
 ${getSetupsSummary()}
 
-WORKFLOW:
-1. ${smcEnabled ? "Review SMC + MTF zone stack (prefetched in SMC block, or get_smc_context / get_mtf_zones)." : "Call get_mtf_zones for HTF→LTF S/R stack."} Call get_xauusd_mtf + get_xauusd_combined on ${mode.combinedTimeframe}.
-2. Use MTF S/R stack as **reference map** for where to look for entries (support/resistance areas, range width). You decide setup_type, side, and entry — not the bot.
-3. Identify: AMD phase, liquidity sweep (BSL/SSL), BMS, SMS, OB/RTO, fib 0.5–0.72 retrace. Tag mtf_sr_zone when entry aligns with a listed zone.
-4. SETUP only if ≥${config.smc?.minConfluence ?? 2} confluence factors AND valid setup_type.
-5. Entry on RTO / fib retrace / zone area — NEVER chase impulsive move after BMS.
-6. WATCH or AVOID if unclear.
+WORKFLOW (max ~4 tool calls when prefetch active):
+1. Review prefetch SMC: AMD phase, liquidity events, MTF S/R map, suggested_setups.
+2. get_xauusd_mtf + get_xauusd_combined (${mode.combinedTimeframe}) — RSI, momentum, news.
+3. Decide SETUP / WATCH / AVOID. If Price is null after tools → WATCH immediately (no blind propose).
+4. SETUP → propose_setup once. WATCH/AVOID → no propose_setup.
 
 SETUP TYPES (setup_type on propose_setup):
 turtle_soup_long | turtle_soup_short | sh_bms_rto | sms_bms_rto | amd_distribution | fib_retrace
@@ -68,20 +80,26 @@ turtle_soup_long | turtle_soup_short | sh_bms_rto | sms_bms_rto | amd_distributi
 CONFLUENCE (confluence_factors array, min ${config.smc?.minConfluence ?? 2}):
 htf_bias | mtf_sr_zone | liquidity_sweep | order_block_rto | fib_ote | london_open | ny_open | asian_range | session_amd | ltf_structure | news_catalyst
 
-HARD RULES:
-- SSL swept → favor LONG setups (turtle_soup_long, RTO long). Do NOT trend-short.
-- BSL swept → favor SHORT setups. Do NOT chase long.
-- Asian 07–13 WIB = range; London 14–19 = manip; NY 19–22 = distribution.
-- ${windowRule}
-- SL max ${maxSl ?? 40} pips on ${mode.combinedTimeframe} structure (not Daily BB).
-- Min confidence ${mode.minConfidence}%, min RR ${mode.minRrRatio}.
+LIQUIDITY SWEEP → SETUP vs WATCH (you decide — use judgment, not one rigid rule):
+| Event | Favor | When to SETUP | When to WATCH |
+| ssl_raid_* (below Asian low / PDL) | turtle_soup_long | Price at/near sweep zone (within ~${mode.entryZonePips ?? 5}p of Asian low/SSL level); market entry at SMC Price | Price already bounced far above zone, or no live price |
+| bsl_raid_* (above Asian high / PDH) | turtle_soup_short | Price at/near sweep zone (within ~${mode.entryZonePips ?? 5}p above Asian high/BSL level); market entry at SMC Price | Price extended >${maxLimitPips}p above raid level with no rejection yet — wait RTO/limit |
+| Sweep + HTF conflict (e.g. BSL + HTF bull) | counter-trend turtle soup | liquidity_sweep + asian_range + ltf_structure (omit htf_bias OR note as risk) | Chase after extended move without structure |
 
-ENTRY STYLE (propose_setup.entry_style):
-- "market" — enter NOW at live price; set entry to the SMC/context price (not a distant S/R level). Executor snaps to live quote if within ${mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25}p.
-- "limit" — for fib_retrace / RTO / deeper retrace: entry at level; max ${mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25}p from current price.
-- After SSL/BSL raid already in progress: if live price IS the sweep zone (e.g. below Asian low), market entry near live price is valid — do NOT limit-entry to a level >${mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25}p away.
-- Do NOT propose market entry far from price — use limit or WATCH.
-- If price already passed the level, WATCH for new structure — do not chase.
+Turtle soup at active sweep ≠ wait for perfect candle — if SMC lists the raid event AND price is in the zone, propose with entry_style "market" and entry = SMC Price.
+
+MTF S/R: reference map only — pick entry/SL from zones + structure; tag mtf_sr_zone when entry aligns.
+
+HARD RULES:
+- SSL swept → do NOT trend-short into the sweep. BSL swept → do NOT trend-long chase.
+- After BMS without retrace: WATCH or limit — no impulsive chase.
+- ${windowRule}
+- SL max ${maxSl ?? 40} pips | min confidence ${mode.minConfidence}% | min RR ${mode.minRrRatio}.
+
+ENTRY (propose_setup):
+- market: entry = SMC/live price (within ${maxMarketPips}p; executor may snap). Use when sweep/RTO is NOW.
+- limit: retrace level within ${maxLimitPips}p of live price (fib/RTO/deeper support).
+- Never limit-entry to a level >${maxLimitPips}p away — WATCH instead.
 
 Session UTC: ${session} | AMD: ${getAMDPhase()} | ${windowStatus}
 
