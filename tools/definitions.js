@@ -52,6 +52,14 @@ export const tools = [
   {
     type: "function",
     function: {
+      name: "get_mtf_zones",
+      description: "MTF S/R zone stack (4h→1h→15m→5m + PDH/PDL/Asian): merged support/resistance levels and nearest zones to price — reference map for you to pick setup area.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_smc_context",
       description: "SMC framework: AMD session phase, Asian range, PDH/PDL, liquidity sweeps (BSL/SSL), HTF bias, suggested setup types.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
@@ -77,7 +85,7 @@ export const tools = [
             type: "array",
             items: {
               type: "string",
-              enum: ["htf_bias", "ltf_structure", "liquidity_sweep", "order_block_rto", "fib_ote", "london_open", "ny_open", "asian_range", "session_amd", "news_catalyst"],
+              enum: ["htf_bias", "ltf_structure", "liquidity_sweep", "order_block_rto", "fib_ote", "london_open", "ny_open", "asian_range", "session_amd", "news_catalyst", "mtf_sr_zone"],
             },
           },
           bias: { type: "string" },

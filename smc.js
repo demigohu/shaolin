@@ -24,6 +24,7 @@ import {
   inferOrderBlockZones,
   bootstrapAsianRangeProxy,
 } from "./smc-analysis.js";
+import { buildMtfZoneStack, formatMtfZonesForPrompt } from "./mtf-zones.js";
 
 let _lastSMCContext = null;
 
@@ -51,6 +52,7 @@ export const CONFLUENCE_TAGS = [
   "asian_range",
   "session_amd",
   "news_catalyst",
+  "mtf_sr_zone",
 ];
 
 async function fetchTf(tf) {
@@ -204,6 +206,15 @@ export async function buildSMCContext({ updateRange = true } = {}) {
     min_confluence: config.smc?.minConfluence ?? 2,
   };
 
+  if (config.mtfZones?.enabled !== false) {
+    context.mtf_zones = buildMtfZoneStack({
+      analyses: { "4h": h4, "1h": h1, "15m": m15, "5m": m5, "1D": daily },
+      price,
+      extras: { pdh: dailyHL.pdh, pdl: dailyHL.pdl, asian },
+      htf: context.htf,
+    });
+  }
+
   log("smc", `Context ${wib.label} ${amdPhase} price=${price} events=${liquidity.events.join(",") || "none"}`);
   _lastSMCContext = context;
   return context;
@@ -273,8 +284,12 @@ export function formatSMCForPrompt(ctx) {
   lines.push("  amd_distribution — Trade distribution leg after London manip");
   lines.push("  fib_retrace — Entry on 50–72% retrace after BMS (not chase)");
 
+  if (ctx.mtf_zones) {
+    lines.push(formatMtfZonesForPrompt(ctx.mtf_zones));
+  }
+
   lines.push("", "RULES:");
-  lines.push("- Min 2 confluence_factors from: htf_bias, liquidity_sweep, order_block_rto, fib_ote, london_open, ny_open, asian_range, session_amd");
+  lines.push("- Min 2 confluence_factors from: htf_bias, mtf_sr_zone, liquidity_sweep, order_block_rto, fib_ote, london_open, ny_open, asian_range, session_amd");
   lines.push("- Do NOT trend-follow short into SSL / oversold (RSI<35) — prefer turtle_soup_long or WATCH");
   lines.push("- Do NOT trend-follow long into BSL / overbought (RSI>65)");
   lines.push("- After BMS: wait retracement to fib 0.5–0.72 or OB — no chase entries");

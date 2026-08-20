@@ -135,5 +135,12 @@
     "bootstrapAsianRange": true,
     "asianRangeMaxPips": 50
   },
+  "mtfZones": {
+    "enabled": true,
+    "mergePips": 8,
+    "proximityPips": 5,
+    "minZoneStrength": 3,
+    "timeframes": ["4h", "1h", "15m", "5m"]
+  },
   "telegramChatId": null
 }

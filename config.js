@@ -161,6 +161,13 @@ export const config = {
     bootstrapAsianRange: u.smc?.bootstrapAsianRange !== false,
     asianRangeMaxPips: u.smc?.asianRangeMaxPips ?? 50,
   },
+  mtfZones: {
+    enabled: u.mtfZones?.enabled !== false,
+    mergePips: u.mtfZones?.mergePips ?? 8,
+    proximityPips: u.mtfZones?.proximityPips ?? 5,
+    minZoneStrength: u.mtfZones?.minZoneStrength ?? 3,
+    timeframes: u.mtfZones?.timeframes ?? ["4h", "1h", "15m", "5m"],
+  },
 };
 
 export { REPO_ROOT, repoPath };

@@ -12,6 +12,7 @@ import {
   extractSignalsFromCombined,
 } from "../signal-tracker.js";
 import { buildSMCContext, validateSMCSetup, getLastSMCContext, formatSMCForPrompt } from "../smc.js";
+import { formatMtfZonesForPrompt } from "../mtf-zones.js";
 import { resolveProposePrice, validateProposedEntry } from "./setup-gates.js";
 import * as market from "./market.js";
 import * as backtest from "./backtest.js";
@@ -32,6 +33,13 @@ const toolMap = {
   get_xauusd_price: () => market.getXauusdPrice(),
   get_gold_news: (args) => market.getGoldNews(args?.limit ?? 5),
   get_market_context: () => market.getMarketSnapshot(),
+  get_mtf_zones: async () => {
+    const last = getLastSMCContext();
+    if (last?.mtf_zones && last.price != null) {
+      return { ...last.mtf_zones, summary: formatMtfZonesForPrompt(last.mtf_zones), from_cache: true };
+    }
+    return market.getMtfZoneStack();
+  },
   get_smc_context: async () => {
     const ctx = await buildSMCContext();
     return { ...ctx, summary: formatSMCForPrompt(ctx) };

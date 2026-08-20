@@ -10,6 +10,8 @@ export function summarizeToolResult(name, result, args = {}) {
   switch (name) {
     case "get_xauusd_mtf":
       return summarizeMtf(result);
+    case "get_mtf_zones":
+      return result.summary || summarizeMtfZones(result);
     case "get_smc_context":
       return result.summary || `SMC ${result.amd_phase} price=${result.price} events=${(result.liquidity_events || []).join(",") || "none"}`;
     case "get_xauusd_combined":
@@ -59,6 +61,16 @@ function summarizeMtf(result) {
   }
 
   return JSON.stringify(result).slice(0, 320);
+}
+
+function summarizeMtfZones(result) {
+  if (result.disabled) return "MTF zones disabled";
+  const ns = result.nearestSupport;
+  const nr = result.nearestResistance;
+  const parts = [`px=${result.price ?? "?"} htf=${result.htf_bias ?? "?"}`];
+  if (ns) parts.push(`S=${ns.price}(str${ns.strength})${result.atSupport ? " AT" : ""}`);
+  if (nr) parts.push(`R=${nr.price}(str${nr.strength})${result.atResistance ? " AT" : ""}`);
+  return parts.join(" | ");
 }
 
 function summarizeCombined(result, args) {

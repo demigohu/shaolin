@@ -2,6 +2,8 @@ import { config } from "../config.js";
 import { callMcpTool } from "./mcp-client.js";
 import { getActiveMode } from "../modes.js";
 import { log } from "../logger.js";
+import { getAsianRange } from "../smc-state.js";
+import { buildMtfZoneStack, formatMtfZonesForPrompt } from "../mtf-zones.js";
 
 /** TradingView coin_analysis puts live price under price_data, not top-level. */
 export function extractPriceFromAnalysis(analysis) {
@@ -217,4 +219,66 @@ export async function getCoinAnalysis(timeframe = "15m") {
     exchange: config.market.dataExchange,
     timeframe,
   });
+}
+
+/** HTF→LTF S/R zone stack for scalp entries (independent of SMC prefetch). */
+export async function getMtfZoneStack() {
+  if (config.mtfZones?.enabled === false) {
+    return { disabled: true, summary: "MTF zones disabled in config." };
+  }
+
+  const tfs = config.mtfZones?.timeframes ?? ["4h", "1h", "15m", "5m"];
+  const analyses = {};
+
+  await Promise.all(tfs.map(async (tf) => {
+    try {
+      analyses[tf] = await callMcpTool("coin_analysis", {
+        symbol: config.market.dataSymbol,
+        exchange: config.market.dataExchange,
+        timeframe: tf,
+      });
+    } catch (error) {
+      analyses[tf] = { error: error.message, timeframe: tf };
+    }
+  }));
+
+  let daily = null;
+  try {
+    daily = await callMcpTool("coin_analysis", {
+      symbol: config.market.dataSymbol,
+      exchange: config.market.dataExchange,
+      timeframe: "1D",
+    });
+    analyses["1D"] = daily;
+  } catch (error) {
+    analyses["1D"] = { error: error.message };
+  }
+
+  const price = extractPriceFromAnalysis(analyses["5m"])
+    ?? extractPriceFromAnalysis(analyses["15m"])
+    ?? extractPriceFromAnalysis(analyses["1h"]);
+
+  const pd = daily?.price_data || {};
+  const asian = getAsianRange();
+  const h4Struct = analyses["4h"]?.market_structure;
+  const h1Struct = analyses["1h"]?.market_structure;
+
+  const stack = buildMtfZoneStack({
+    analyses,
+    price,
+    extras: {
+      pdh: pd.high ?? null,
+      pdl: pd.low ?? null,
+      asian,
+    },
+    htf: {
+      h4_trend: h4Struct?.trend,
+      h1_trend: h1Struct?.trend,
+    },
+  });
+
+  return {
+    ...stack,
+    summary: formatMtfZonesForPrompt(stack),
+  };
 }
