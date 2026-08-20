@@ -140,13 +140,7 @@ function suggestPlaybooks(liquidityEvents, amdPhase, h1Trend) {
   return [...new Set(plays)];
 }
 
-export async function buildSMCContext({ updateRange = true, forceRefresh = false } = {}) {
-  const cacheSec = config.smc?.contextCacheSec ?? 90;
-  if (!forceRefresh && _lastSMCContext?.fetched_at) {
-    const ageMs = Date.now() - _lastSMCContext.fetched_at;
-    if (ageMs < cacheSec * 1000) return _lastSMCContext;
-  }
-
+export async function buildSMCContext({ updateRange = true } = {}) {
   // Sequential TF fetches — parallel bursts trigger TradingView failure cooldowns on VPS.
   const m5 = await fetchTf("5m");
   const daily = await fetchTf("1D");
@@ -209,7 +203,6 @@ export async function buildSMCContext({ updateRange = true, forceRefresh = false
     liquidity_hints: liquidity.hints,
     suggested_setups: suggestPlaybooks(liquidity.events, amdPhase, h1Struct?.trend),
     min_confluence: config.smc?.minConfluence ?? 2,
-    fetched_at: Date.now(),
   };
 
   if (config.mtfZones?.enabled !== false) {
