@@ -140,19 +140,24 @@ function suggestPlaybooks(liquidityEvents, amdPhase, h1Trend) {
   return [...new Set(plays)];
 }
 
-export async function buildSMCContext({ updateRange = true } = {}) {
-  // Warm up MCP session before parallel fetches (avoids "before initialization" race).
-  const m5 = await fetchTf("5m");
-  const [daily, h4, h1, m15] = await Promise.all([
-    fetchTf("1D"),
-    fetchTf("4h"),
-    fetchTf("1h"),
-    fetchTf("15m"),
-  ]);
+export async function buildSMCContext({ updateRange = true, forceRefresh = false } = {}) {
+  const cacheSec = config.smc?.contextCacheSec ?? 90;
+  if (!forceRefresh && _lastSMCContext?.fetched_at) {
+    const ageMs = Date.now() - _lastSMCContext.fetched_at;
+    if (ageMs < cacheSec * 1000) return _lastSMCContext;
+  }
 
-  const price = extractPriceFromAnalysis(m5)
+  // Sequential TF fetches — parallel bursts trigger TradingView failure cooldowns on VPS.
+  const m5 = await fetchTf("5m");
+  const daily = await fetchTf("1D");
+  const h4 = await fetchTf("4h");
+  const h1 = await fetchTf("1h");
+  const m15 = await fetchTf("15m");
+
+  let price = extractPriceFromAnalysis(m5)
     ?? extractPriceFromAnalysis(m15)
     ?? extractPriceFromAnalysis(h1)
+    ?? extractPriceFromAnalysis(h4)
     ?? extractPriceFromAnalysis(daily);
   if (updateRange && price != null) updateAsianRange(price);
 
@@ -204,6 +209,7 @@ export async function buildSMCContext({ updateRange = true } = {}) {
     liquidity_hints: liquidity.hints,
     suggested_setups: suggestPlaybooks(liquidity.events, amdPhase, h1Struct?.trend),
     min_confluence: config.smc?.minConfluence ?? 2,
+    fetched_at: Date.now(),
   };
 
   if (config.mtfZones?.enabled !== false) {

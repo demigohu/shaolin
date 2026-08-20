@@ -50,6 +50,7 @@ Active strategy: ${strategy.name} (${strategy.id})
 ROLE: SCREENER — Smart Money / Market Structure (PDF framework). At most ONE setup per cycle.
 
 ${smcEnabled ? context.prefetchSummary || "Call get_smc_context first for AMD phase, Asian range, liquidity." : ""}
+${smcEnabled && context.prefetchSummary ? "SMC already prefetched above — do NOT call get_smc_context or get_mtf_zones again unless price is missing." : ""}
 
 OPEN SETUPS (do NOT call propose_setup if any listed):
 ${getSetupsSummary()}

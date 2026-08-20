@@ -35,14 +35,15 @@ const toolMap = {
   get_market_context: () => market.getMarketSnapshot(),
   get_mtf_zones: async () => {
     const last = getLastSMCContext();
-    if (last?.mtf_zones && last.price != null) {
+    const cacheSec = config.smc?.contextCacheSec ?? 90;
+    if (last?.mtf_zones && last.fetched_at && Date.now() - last.fetched_at < cacheSec * 1000) {
       return { ...last.mtf_zones, summary: formatMtfZonesForPrompt(last.mtf_zones), from_cache: true };
     }
     return market.getMtfZoneStack();
   },
   get_smc_context: async () => {
     const ctx = await buildSMCContext();
-    return { ...ctx, summary: formatSMCForPrompt(ctx) };
+    return { ...ctx, summary: formatSMCForPrompt(ctx), from_cache: false };
   },
   get_active_setups: () => ({ setups: getOpenSetups() }),
   get_recent_screening: (args) => ({ decisions: getRecentScreeningDecisions(args?.limit ?? 10) }),

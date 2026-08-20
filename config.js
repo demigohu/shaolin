@@ -160,6 +160,7 @@ export const config = {
     blockTrendFollowAtLiquidity: u.smc?.blockTrendFollowAtLiquidity !== false,
     bootstrapAsianRange: u.smc?.bootstrapAsianRange !== false,
     asianRangeMaxPips: u.smc?.asianRangeMaxPips ?? 50,
+    contextCacheSec: u.smc?.contextCacheSec ?? 90,
   },
   mtfZones: {
     enabled: u.mtfZones?.enabled !== false,
