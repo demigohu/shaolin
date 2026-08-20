@@ -39,20 +39,24 @@ export function extractLevelsFromAnalysis(analysis, tf) {
   return levels;
 }
 
-export function extractExtraLevels(extras) {
+export function extractExtraLevels(extras, price = null) {
   const levels = [];
   const { pdh, pdl, asian } = extras || {};
   if (Number.isFinite(pdh) && pdh > 0) {
-    levels.push({ price: pdh, kind: "resistance", label: "PDH", tf: "1D", weight: 5, source: "session" });
+    const kind = price != null && price >= pdh ? "support" : "resistance";
+    levels.push({ price: pdh, kind, label: "PDH", tf: "1D", weight: 5, source: "session" });
   }
   if (Number.isFinite(pdl) && pdl > 0) {
-    levels.push({ price: pdl, kind: "support", label: "PDL", tf: "1D", weight: 5, source: "session" });
+    const kind = price != null && price <= pdl ? "resistance" : "support";
+    levels.push({ price: pdl, kind, label: "PDL", tf: "1D", weight: 5, source: "session" });
   }
   if (asian?.high) {
-    levels.push({ price: asian.high, kind: "resistance", label: "Asian high", tf: "session", weight: 4, source: "asian" });
+    const kind = price != null && price >= asian.high ? "support" : "resistance";
+    levels.push({ price: asian.high, kind, label: "Asian high", tf: "session", weight: 4, source: "asian" });
   }
   if (asian?.low) {
-    levels.push({ price: asian.low, kind: "support", label: "Asian low", tf: "session", weight: 4, source: "asian" });
+    const kind = price != null && price < asian.low ? "resistance" : "support";
+    levels.push({ price: asian.low, kind, label: "Asian low", tf: "session", weight: 4, source: "asian" });
   }
   return levels;
 }
@@ -114,22 +118,19 @@ export function classifyZonesAtPrice(price, zones, proximityPips) {
   const pip = config.broker.pipSize || 0.1;
   const prox = proximityPips * pip;
 
-  const supports = zones
-    .filter((z) => z.kind === "support" || (z.kind === "pivot" && z.price <= price))
-    .sort((a, b) => b.price - a.price);
-  const resistances = zones
-    .filter((z) => z.kind === "resistance" || (z.kind === "pivot" && z.price >= price))
-    .sort((a, b) => a.price - b.price);
+  // Position relative to live price — broken levels flip role (resistance below price → support context).
+  const below = zones.filter((z) => z.price <= price).sort((a, b) => b.price - a.price);
+  const above = zones.filter((z) => z.price >= price).sort((a, b) => a.price - b.price);
 
-  const nearestSupport = supports.find((z) => z.price <= price + prox) || null;
-  const nearestResistance = resistances.find((z) => z.price >= price - prox) || null;
+  const nearestSupport = below[0] || null;
+  const nearestResistance = above[0] || null;
 
   const atSupport = nearestSupport != null && Math.abs(price - nearestSupport.price) <= prox;
   const atResistance = nearestResistance != null && Math.abs(price - nearestResistance.price) <= prox;
 
   return {
-    supports: supports.slice(0, 6),
-    resistances: resistances.slice(0, 6),
+    supports: below.slice(0, 6),
+    resistances: above.slice(0, 6),
     nearestSupport,
     nearestResistance,
     atSupport,
@@ -198,7 +199,7 @@ export function buildMtfZoneStack({ analyses = {}, price = null, extras = {}, ht
   for (const tf of enabledTfs) {
     if (analyses[tf]) raw.push(...extractLevelsFromAnalysis(analyses[tf], tf));
   }
-  raw.push(...extractExtraLevels(extras));
+  raw.push(...extractExtraLevels(extras, livePrice));
 
   const merged = mergeZoneLevels(raw, mergePips);
   const classified = classifyZonesAtPrice(livePrice, merged, proximityPips);
