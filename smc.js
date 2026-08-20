@@ -209,13 +209,26 @@ export async function buildSMCContext({ updateRange = true } = {}) {
   return context;
 }
 
+function formatTradingWindowLine(ctx) {
+  const requireWindow = config.smc?.requireTradingWindow !== false;
+  if (!requireWindow) {
+    if (ctx.trading_window) {
+      return "Session (London 14–19 / NY 19–22 WIB): ACTIVE — window gate OFF, SETUP ok if confluence + entry rules met";
+    }
+    return "Session: off London/NY peak — window gate OFF, SETUP still allowed if confluence + entry rules met";
+  }
+  return ctx.trading_window
+    ? "Trading window (London 14–19 / NY 19–22 WIB): YES — preferred entry time"
+    : "Trading window: NO — prefer WATCH unless clear AMD play (turtle soup + liquidity sweep off-hours only)";
+}
+
 export function formatSMCForPrompt(ctx) {
   if (!ctx) return "SMC disabled.";
   const lines = [
     "── SMC / MARKET STRUCTURE (PDF framework) ──",
     `WIB: ${ctx.wib} | Phase: ${ctx.amd_phase}`,
     ctx.amd_description,
-    `Trading window (London/NY open): ${ctx.trading_window ? "YES — preferred entry time" : "NO — prefer WATCH unless clear AMD play"}`,
+    formatTradingWindowLine(ctx),
     `Price: ${ctx.price ?? "?"}`,
   ];
 
@@ -301,7 +314,7 @@ export function validateSMCSetup(args, ctx = null) {
       return {
         ok: false,
         reason: "outside_trading_window",
-        message: "Outside London/NY window (14–18 / 19–22 WIB) — prefer WATCH per PDF",
+        message: "Outside London/NY window (14–19 / 19–22 WIB) — prefer WATCH per PDF",
       };
     }
   }

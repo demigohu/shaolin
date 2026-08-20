@@ -13,7 +13,7 @@ export function getWIBNow() {
   };
 }
 
-/** Asian 07-13 | London manip 14-18 | NY distrib 19-22 WIB */
+/** Asian 07–13 | London manip 14–19 | NY distrib 19–22 WIB */
 export function getAMDPhase() {
   const { hour } = getWIBNow();
   if (hour >= 7 && hour < 13) return "asian_accumulation";
@@ -22,9 +22,10 @@ export function getAMDPhase() {
   return "off_hours";
 }
 
+/** Aligned with london_manipulation AMD phase (14:00–18:59 WIB). */
 export function isLondonOpenWindow() {
   const { hour } = getWIBNow();
-  return hour >= 14 && hour < 18;
+  return hour >= 14 && hour < 19;
 }
 
 export function isNewYorkOpenWindow() {

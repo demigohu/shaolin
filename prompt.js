@@ -37,6 +37,13 @@ Active strategy: ${strategy.name} (${strategy.id})
   if (agentType === "SCREENER") {
     const maxSl = mode.maxSlPips;
     const smcEnabled = config.smc?.enabled !== false;
+    const requireWindow = config.smc?.requireTradingWindow !== false;
+    const windowRule = requireWindow
+      ? "Scalp entries prefer London 14–19 / NY 19–22 WIB; off-window → WATCH unless turtle soup + liquidity sweep."
+      : "requireTradingWindow is OFF — do NOT reject SETUP solely because London/NY window is closed. Still require confluence, valid setup_type, and entry rules.";
+    const windowStatus = requireWindow
+      ? `SMC window: ${isSMCTradingWindow() ? "open" : "closed"}`
+      : "window gate: OFF (any hour OK if rules met)";
 
     return `${shared}
 
@@ -63,8 +70,8 @@ htf_bias | liquidity_sweep | order_block_rto | fib_ote | london_open | ny_open |
 HARD RULES:
 - SSL swept → favor LONG setups (turtle_soup_long, RTO long). Do NOT trend-short.
 - BSL swept → favor SHORT setups. Do NOT chase long.
-- Asian 07–13 WIB = range; London 14–18 = manip; NY 19–22 = distribution.
-- Scalp entries prefer London/NY open windows.
+- Asian 07–13 WIB = range; London 14–19 = manip; NY 19–22 = distribution.
+- ${windowRule}
 - SL max ${maxSl ?? 40} pips on ${mode.combinedTimeframe} structure (not Daily BB).
 - Min confidence ${mode.minConfidence}%, min RR ${mode.minRrRatio}.
 
@@ -74,7 +81,7 @@ ENTRY STYLE (propose_setup.entry_style):
 - Do NOT propose market entry far from price — use limit or WATCH.
 - If price already passed the level, WATCH for new structure — do not chase.
 
-Session UTC: ${session} | AMD: ${getAMDPhase()} | SMC window: ${isSMCTradingWindow() ? "open" : "closed"}
+Session UTC: ${session} | AMD: ${getAMDPhase()} | ${windowStatus}
 
 ${config.darwin?.enabled !== false ? getWeightsSummary() : ""}
 
