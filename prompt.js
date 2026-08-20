@@ -77,7 +77,7 @@ HARD RULES:
 - Min confidence ${mode.minConfidence}%, min RR ${mode.minRrRatio}.
 
 ENTRY STYLE (propose_setup.entry_style):
-- "market" — entry must be within ${mode.entryZonePips ?? 3}p of LIVE price (immediate manual entry on MT5).
+- "market" — enter NOW at live price; set entry to the SMC/context price (not a distant S/R level). Executor snaps to live quote if within ${mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25}p.
 - "limit" — for fib_retrace / RTO / deeper retrace: entry at level; max ${mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25}p from current price.
 - After SSL/BSL raid already in progress: if live price IS the sweep zone (e.g. below Asian low), market entry near live price is valid — do NOT limit-entry to a level >${mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25}p away.
 - Do NOT propose market entry far from price — use limit or WATCH.

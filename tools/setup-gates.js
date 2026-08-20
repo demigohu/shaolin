@@ -52,7 +52,19 @@ export function validateProposedEntry(args, price, mode) {
   }
 
   if (entryStyle === "market") {
+    // Market = enter now at live price; LLM often passes a zone level instead of the quote.
     if (distPips > maxMarketPips) {
+      const maxSnap = maxLimitPips;
+      if (distPips <= maxSnap) {
+        return {
+          ok: true,
+          entry_style: "market",
+          distPips: 0,
+          price_at_propose: price,
+          entry: price,
+          entry_snapped_from: entry,
+        };
+      }
       return {
         ok: false,
         reason: "entry_too_far",

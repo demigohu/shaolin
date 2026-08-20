@@ -195,10 +195,12 @@ export async function runScreeningCycle({ silent = false } = {}) {
       appendScreeningDecision({ action, summary: content?.slice(0, 200), reason: content?.slice(0, 500) });
       const smc = getLastSMCContext();
       const digestEvery = config.notifications?.digestEveryScreeningCycles ?? 1;
-      const sendDigest = notify && config.notifications?.notifyScreeningDigest
+      const sendDigest = notify && config.notifications?.enabled !== false
+        && config.notifications?.notifyScreeningDigest
         && _screenCycleCount % digestEvery === 0
         && shouldNotifyTelegram("screening_digest");
-      const sendResult = notify && config.notifications?.notifyScreeningResult
+      const sendResult = notify && config.notifications?.enabled !== false
+        && config.notifications?.notifyScreeningResult
         && shouldNotifyTelegram(`screen_${action}`, config.notifications?.cooldownMin?.screen_watch ?? 30);
 
       if (sendDigest) {

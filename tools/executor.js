@@ -141,6 +141,7 @@ const toolMap = {
 
     const result = createSetup({
       ...args,
+      entry: entryCheck.entry ?? args.entry,
       setup_type: smcCheck.setup_type || args.setup_type,
       confluence_factors: smcCheck.confluence || args.confluence_factors,
       session: getCurrentSession(),
