@@ -36,7 +36,10 @@ Active strategy: ${strategy.name} (${strategy.id})
 
   if (agentType === "SCREENER") {
     const maxSl = mode.maxSlPips;
+    const minSl = mode.minSlPips ?? 20;
     const smcEnabled = config.smc?.enabled !== false;
+    const maxMarketPips = config.screening?.maxEntrySlippagePips ?? mode.entryZonePips ?? 3;
+    const maxLimitPips = mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25;
     const requireWindow = config.smc?.requireTradingWindow !== false;
     const windowRule = requireWindow
       ? "Scalp entries prefer London 14–19 / NY 19–22 WIB; off-window → WATCH unless turtle soup + liquidity sweep."
@@ -44,9 +47,6 @@ Active strategy: ${strategy.name} (${strategy.id})
     const windowStatus = requireWindow
       ? `SMC window: ${isSMCTradingWindow() ? "open" : "closed"}`
       : "window gate: OFF (any hour OK if rules met)";
-
-    const maxMarketPips = config.screening?.maxEntrySlippagePips ?? mode.entryZonePips ?? 3;
-    const maxLimitPips = mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25;
 
     const prefetchBlock = smcEnabled && context.prefetchSummary
       ? `${context.prefetchSummary}
@@ -94,7 +94,9 @@ HARD RULES:
 - SSL swept → do NOT trend-short into the sweep. BSL swept → do NOT trend-long chase.
 - After BMS without retrace: WATCH or limit — no impulsive chase.
 - ${windowRule}
-- SL max ${maxSl ?? 40} pips | min confidence ${mode.minConfidence}% | min RR ${mode.minRrRatio}.
+- SL **${minSl}–${maxSl ?? 40} pips** from entry (min = room below/above structure; do NOT put SL on the same level as entry zone).
+- Long: SL below **next** support stack level, not 1–2p under fib entry. Short: SL above next resistance.
+- Min confidence ${mode.minConfidence}% | min RR ${mode.minRrRatio} (enforced on propose).
 
 ENTRY (propose_setup):
 - market: entry = SMC/live price (within ${maxMarketPips}p; executor may snap). Use when sweep/RTO is NOW.

@@ -35,6 +35,7 @@ const defaultModes = {
     setupMaxAgeMin: 90,
     entryZonePips: 3,
     maxSlPips: 40,
+    minSlPips: 20,
     maxStaleDistancePips: 15,
     maxLimitEntryPips: 25,
     minConfidence: 65,

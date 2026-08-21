@@ -131,8 +131,22 @@ export function createSetup(input) {
 
   const slPips = toPips(Math.abs(entry - sl));
   const maxSl = mode.maxSlPips;
+  const minSl = mode.minSlPips;
   if (maxSl != null && slPips > maxSl) {
     return { skipped: true, reason: "sl_too_wide", sl_pips: slPips, max_sl_pips: maxSl };
+  }
+  if (minSl != null && slPips < minSl) {
+    return {
+      skipped: true,
+      reason: "sl_too_tight",
+      sl_pips: slPips,
+      min_sl_pips: minSl,
+    };
+  }
+
+  const minRr = mode.minRrRatio ?? 1.2;
+  if (minRr > 0 && rr < minRr) {
+    return { skipped: true, reason: "rr_too_low", rr_ratio: rr, min_rr: minRr };
   }
 
   if (isThesisOnCooldown(candidate)) {

@@ -155,11 +155,18 @@ const toolMap = {
         thesis_id: result.thesis_id,
         sl_pips: result.sl_pips,
         max_sl_pips: result.max_sl_pips,
+        min_sl_pips: result.min_sl_pips,
+        rr_ratio: result.rr_ratio,
+        min_rr: result.min_rr,
         message: result.reason === "open_setup_exists"
           ? `Open setup ${result.existing} still active — management handles it`
           : result.reason === "sl_too_wide"
             ? `SL ${result.sl_pips} pips exceeds max ${result.max_sl_pips} for ${mode.id}`
-            : undefined,
+            : result.reason === "sl_too_tight"
+              ? `SL ${result.sl_pips} pips below min ${result.min_sl_pips} — place SL below next structure level, not on top of entry zone`
+              : result.reason === "rr_too_low"
+                ? `RR ${result.rr_ratio} below min ${result.min_rr}`
+                : undefined,
         ...extra,
       };
     }
