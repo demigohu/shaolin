@@ -3,7 +3,7 @@ import cron from "node-cron";
 import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { config } from "./config.js";
-import { getActiveMode, getModeIntervals, isSessionAllowed, switchMode } from "./modes.js";
+import { getActiveMode, getModeIntervals, isSessionAllowed, isWeekendMarketClosed, switchMode } from "./modes.js";
 import { appendScreeningDecision } from "./screening-log.js";
 import {
   expireStaleSetups,
@@ -24,6 +24,7 @@ import {
   formatSetupAlert,
   shouldNotifyTelegram,
   formatSessionSkip,
+  formatWeekendSkip,
   formatOpenSetupSkip,
   formatManagementDigest,
   formatEventAlert,
@@ -97,6 +98,16 @@ export async function runScreeningCycle({ silent = false } = {}) {
 
   try {
     log("cron", `Screening cycle [${mode.id}]`);
+
+    if (config.screening?.skipWeekends !== false && isWeekendMarketClosed()) {
+      const msg = "Weekend — XAUUSD market closed, skipping screening";
+      appendScreeningDecision({ action: "AVOID", summary: msg, reason: "weekend_market_closed" });
+      log("screen", msg);
+      if (notify && config.notifications?.notifyWeekendSkip && shouldNotifyTelegram("weekend_market_closed")) {
+        await sendMessage(formatWeekendSkip(mode));
+      }
+      return msg;
+    }
 
     if (!isSessionAllowed(mode)) {
       const msg = `Session not allowed for ${mode.id} — skipping screening`;

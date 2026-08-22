@@ -1,6 +1,164 @@
 import { config } from "../config.js";
-import { toPips } from "./price.js";
+import { roundToPips, toPips } from "./price.js";
 import { getLastSMCContext } from "../smc.js";
+
+const STRUCTURE_SL_SETUPS = new Set([
+  "turtle_soup_long",
+  "turtle_soup_short",
+  "sh_bms_rto",
+  "sms_bms_rto",
+  "fib_retrace",
+]);
+
+function resolveMinSlPips(setupType, mode) {
+  const bySetup = config.screening?.minSlPipsBySetup;
+  if (setupType && bySetup?.[setupType] != null) return bySetup[setupType];
+  return mode.minSlPips ?? 15;
+}
+
+/** Highest support strictly below entry zone (not the zone you're entering at). */
+function findStructureFloor(entry, ctx, zonePips = 2) {
+  const pip = config.broker.pipSize || 0.1;
+  const cutoff = entry - zonePips * pip;
+  const levels = [];
+  for (const s of ctx?.mtf_zones?.supports || []) {
+    if (s.price <= cutoff) levels.push(s.price);
+  }
+  if (ctx?.swing?.swing_low != null && ctx.swing.swing_low <= cutoff) {
+    levels.push(ctx.swing.swing_low);
+  }
+  if (ctx?.pdl != null && ctx.pdl <= cutoff) levels.push(ctx.pdl);
+  const ns = ctx?.ltf?.nearest_support;
+  if (ns != null && ns <= cutoff) levels.push(ns);
+  return levels.length ? Math.max(...levels) : null;
+}
+
+/** Lowest resistance strictly above entry zone. */
+function findStructureCeiling(entry, ctx, zonePips = 2) {
+  const pip = config.broker.pipSize || 0.1;
+  const cutoff = entry + zonePips * pip;
+  const levels = [];
+  for (const r of ctx?.mtf_zones?.resistances || []) {
+    if (r.price >= cutoff) levels.push(r.price);
+  }
+  if (ctx?.swing?.swing_high != null && ctx.swing.swing_high >= cutoff) {
+    levels.push(ctx.swing.swing_high);
+  }
+  if (ctx?.pdh != null && ctx.pdh >= cutoff) levels.push(ctx.pdh);
+  const nr = ctx?.ltf?.nearest_resistance;
+  if (nr != null && nr >= cutoff) levels.push(nr);
+  return levels.length ? Math.min(...levels) : null;
+}
+
+export function validateProposedSl(args, ctx, mode) {
+  const entry = Number(args.entry);
+  const sl = Number(args.sl);
+  const side = args.side;
+  if (!["long", "short"].includes(side) || !Number.isFinite(entry) || !Number.isFinite(sl)) {
+    return { ok: false, reason: "invalid_sl", message: "Invalid entry or SL." };
+  }
+
+  const pip = config.broker.pipSize || 0.1;
+  const minSl = resolveMinSlPips(args.setup_type, mode);
+  const maxSl = mode.maxSlPips ?? 40;
+  const bufferPips = config.screening?.slStructureBufferPips ?? 3;
+  const slPips = toPips(Math.abs(entry - sl));
+
+  if (side === "long" && sl >= entry) {
+    return { ok: false, reason: "sl_wrong_side", message: "Long SL must be below entry." };
+  }
+  if (side === "short" && sl <= entry) {
+    return { ok: false, reason: "sl_wrong_side", message: "Short SL must be above entry." };
+  }
+  if (slPips < minSl) {
+    return {
+      ok: false,
+      reason: "sl_too_tight",
+      sl_pips: slPips,
+      min_sl_pips: minSl,
+      message: `SL ${slPips}p too tight (min ${minSl}p for ${args.setup_type || "setup"}) — place below next structure, not on entry zone.`,
+    };
+  }
+  if (maxSl != null && slPips > maxSl) {
+    return {
+      ok: false,
+      reason: "sl_too_wide",
+      sl_pips: slPips,
+      max_sl_pips: maxSl,
+      message: `SL ${slPips}p exceeds max ${maxSl}p.`,
+    };
+  }
+
+  if (!STRUCTURE_SL_SETUPS.has(args.setup_type) || !ctx) {
+    return { ok: true, sl_pips: slPips };
+  }
+
+  const events = ctx.liquidity_events || [];
+  const zonePips = mode.entryZonePips ?? 3;
+  const belowSweepPips = config.smc?.slBelowSweepPips ?? 10;
+
+  if (side === "long") {
+    const refs = [];
+    const floor = findStructureFloor(entry, ctx, zonePips);
+    if (floor != null) {
+      const structSl = floor - bufferPips * pip;
+      const structDistPips = toPips(entry - structSl);
+      if (structDistPips <= maxSl) refs.push(structSl);
+    }
+
+    if (events.some((e) => e.startsWith("ssl_"))) {
+      const sweepRef = Math.min(entry, ctx.price ?? entry);
+      refs.push(sweepRef - belowSweepPips * pip);
+    }
+
+    if (refs.length) {
+      const maxAllowedSl = Math.min(...refs);
+      if (sl > maxAllowedSl + pip * 0.01) {
+        const needPips = toPips(entry - maxAllowedSl);
+        return {
+          ok: false,
+          reason: "sl_above_structure",
+          sl_pips: slPips,
+          min_sl_pips: Math.max(minSl, needPips),
+          structure_level: roundToPips(Math.min(...refs) + bufferPips * pip),
+          suggested_max_sl: roundToPips(maxAllowedSl),
+          message: `SL ${sl} too high — need ≥${Math.max(minSl, needPips)}p below entry (below sweep/structure ~${roundToPips(maxAllowedSl + bufferPips * pip)}).`,
+        };
+      }
+    }
+  } else {
+    const refs = [];
+    const ceiling = findStructureCeiling(entry, ctx, zonePips);
+    if (ceiling != null) {
+      const structSl = ceiling + bufferPips * pip;
+      const structDistPips = toPips(structSl - entry);
+      if (structDistPips <= maxSl) refs.push(structSl);
+    }
+
+    if (events.some((e) => e.startsWith("bsl_"))) {
+      const sweepRef = Math.max(entry, ctx.price ?? entry);
+      refs.push(sweepRef + belowSweepPips * pip);
+    }
+
+    if (refs.length) {
+      const minAllowedSl = Math.max(...refs);
+      if (sl < minAllowedSl - pip * 0.01) {
+        const needPips = toPips(minAllowedSl - entry);
+        return {
+          ok: false,
+          reason: "sl_below_structure",
+          sl_pips: slPips,
+          min_sl_pips: Math.max(minSl, needPips),
+          structure_level: roundToPips(minAllowedSl - bufferPips * pip),
+          suggested_min_sl: roundToPips(minAllowedSl),
+          message: `SL ${sl} too low — need ≥${Math.max(minSl, needPips)}p above entry (above sweep/structure ~${roundToPips(minAllowedSl - bufferPips * pip)}).`,
+        };
+      }
+    }
+  }
+
+  return { ok: true, sl_pips: slPips };
+}
 
 const LIMIT_SETUP_TYPES = new Set(["fib_retrace", "sh_bms_rto", "sms_bms_rto"]);
 

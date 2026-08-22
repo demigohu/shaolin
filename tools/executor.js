@@ -12,7 +12,7 @@ import {
   extractSignalsFromCombined,
 } from "../signal-tracker.js";
 import { buildSMCContext, validateSMCSetup, getLastSMCContext, formatSMCForPrompt } from "../smc.js";
-import { resolveProposePrice, validateProposedEntry } from "./setup-gates.js";
+import { resolveProposePrice, validateProposedEntry, validateProposedSl } from "./setup-gates.js";
 import * as market from "./market.js";
 import * as backtest from "./backtest.js";
 
@@ -137,6 +137,26 @@ const toolMap = {
         price_at_propose: entryCheck.price_at_propose,
         entry_distance_pips: entryCheck.distPips,
         distPips: entryCheck.distPips,
+      }, args);
+    }
+
+    const slCheck = validateProposedSl(
+      { ...args, entry: entryCheck.entry ?? args.entry },
+      getLastSMCContext(),
+      mode,
+    );
+    if (!slCheck.ok) {
+      return recordProposeBlocked({
+        success: false,
+        blocked: true,
+        reason: slCheck.reason,
+        message: slCheck.message,
+        sl_pips: slCheck.sl_pips,
+        min_sl_pips: slCheck.min_sl_pips,
+        max_sl_pips: slCheck.max_sl_pips,
+        structure_level: slCheck.structure_level,
+        suggested_max_sl: slCheck.suggested_max_sl,
+        suggested_min_sl: slCheck.suggested_min_sl,
       }, args);
     }
 

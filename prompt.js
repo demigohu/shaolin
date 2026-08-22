@@ -98,8 +98,9 @@ HARD RULES:
 - SSL swept → do NOT trend-short into the sweep. BSL swept → do NOT trend-long chase.
 - After BMS without retrace: WATCH or limit — no impulsive chase.
 - ${windowRule}
-- SL **${minSl}–${maxSl ?? 40} pips** from entry (min = room below/above structure; do NOT put SL on the same level as entry zone).
-- Long: SL below **next** support stack level, not 1–2p under fib entry. Short: SL above next resistance.
+- SL **${minSl}–${maxSl ?? 40} pips** from entry. **turtle_soup_* min 20p** — never 15–18p on entry zone.
+- Long: SL below **next** support / swing low / sweep wick (≥10p below SSL sweep low). Short: SL above next resistance / BSL sweep high.
+- If entry sits ON the support zone, SL must be below the **next** level down in MTF stack — not 2p under entry.
 - Min confidence ${mode.minConfidence}% | min RR ${mode.minRrRatio} (enforced on propose).
 
 ENTRY (propose_setup):

@@ -98,6 +98,12 @@ export const config = {
     maxEntrySlippagePips: u.screening?.maxEntrySlippagePips ?? null,
     maxLimitEntryPips: u.screening?.maxLimitEntryPips ?? null,
     maxStaleDistancePips: u.screening?.maxStaleDistancePips ?? 15,
+    skipWeekends: u.screening?.skipWeekends !== false,
+    slStructureBufferPips: u.screening?.slStructureBufferPips ?? 3,
+    minSlPipsBySetup: u.screening?.minSlPipsBySetup ?? {
+      turtle_soup_long: 20,
+      turtle_soup_short: 20,
+    },
   },
   management: {
     breakevenAlertAfterTp1: u.breakevenAlertAfterTp1 ?? true,
@@ -113,6 +119,7 @@ export const config = {
     notifyScreeningResult: u.notifications?.notifyScreeningResult ?? true,
     notifyOpenSetupSkip: u.notifications?.notifyOpenSetupSkip ?? true,
     notifySessionSkip: u.notifications?.notifySessionSkip ?? false,
+    notifyWeekendSkip: u.notifications?.notifyWeekendSkip ?? false,
     digestEveryManagementCycles: u.notifications?.digestEveryManagementCycles ?? 5,
     digestEveryScreeningCycles: u.notifications?.digestEveryScreeningCycles ?? 1,
     cooldownMin: {
@@ -163,6 +170,7 @@ export const config = {
     asianRangeMaxPips: u.smc?.asianRangeMaxPips ?? 50,
     asianNearPips: u.smc?.asianNearPips ?? 5,
     asianRangeMinPips: u.smc?.asianRangeMinPips ?? 5,
+    slBelowSweepPips: u.smc?.slBelowSweepPips ?? 10,
   },
   mtfZones: {
     enabled: u.mtfZones?.enabled !== false,

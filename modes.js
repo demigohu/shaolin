@@ -24,6 +24,12 @@ export function getCurrentSession() {
   return "off_hours";
 }
 
+/** XAUUSD spot/CFD — no new liquidity Sat/Sun (UTC). */
+export function isWeekendMarketClosed() {
+  const day = new Date().getUTCDay();
+  return day === 0 || day === 6;
+}
+
 export function isSessionAllowed(mode = getActiveMode()) {
   const sessions = mode.sessions || ["any"];
   if (sessions.includes("any")) return true;

@@ -24,6 +24,17 @@ export function resetNotifyCooldown(key) {
   lastTelegramAt.delete(key);
 }
 
+export function formatWeekendSkip(mode) {
+  const day = new Date().toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+  return [
+    "⏸ SHAOLIN — Screening skipped (weekend)",
+    `Mode: ${mode.id} | UTC day: ${day}`,
+    "XAUUSD tidak trade Sabtu/Minggu — data stale, no SETUP.",
+    "Management tetap jalan untuk open setups.",
+    "Tip: screening.skipWeekends: false di user-config kalau mau force test.",
+  ].join("\n");
+}
+
 export function formatSessionSkip(mode) {
   const session = getCurrentSession();
   const allowed = (mode.sessions || []).join(", ");
