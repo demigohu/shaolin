@@ -53,6 +53,8 @@ Active strategy: ${strategy.name} (${strategy.id})
 
 PREFETCH ACTIVE — SMC + MTF zones already loaded above.
 - Do NOT call get_smc_context or get_mtf_zones (duplicate fetch).
+- Trust the Liquidity line and "liquidity detect" Asian range over a flat/narrow session track range.
+- If Liquidity lists ssl_raid_* or bsl_raid_*, the sweep is ACTIVE — never write "no SSL/BSL raid".
 - Start with get_xauusd_mtf + get_xauusd_combined on ${mode.combinedTimeframe}.
 - Only call get_xauusd_price if prefetch Price is "?" or null.`
       : smcEnabled
@@ -82,11 +84,13 @@ htf_bias | mtf_sr_zone | liquidity_sweep | order_block_rto | fib_ote | london_op
 
 LIQUIDITY SWEEP → SETUP vs WATCH (you decide — use judgment, not one rigid rule):
 | Event | Favor | When to SETUP | When to WATCH |
-| ssl_raid_* (below Asian low / PDL) | turtle_soup_long | Price at/near sweep zone (within ~${mode.entryZonePips ?? 5}p of Asian low/SSL level); market entry at SMC Price | Price already bounced far above zone, or no live price |
-| bsl_raid_* (above Asian high / PDH) | turtle_soup_short | Price at/near sweep zone (within ~${mode.entryZonePips ?? 5}p above Asian high/BSL level); market entry at SMC Price | Price extended >${maxLimitPips}p above raid level with no rejection yet — wait RTO/limit |
+| ssl_raid_* (price BELOW detect Asian low / PDL) | turtle_soup_long | Sweep confirmed; price still within ~${maxLimitPips}p below level OR clear rejection/wick at SSL; market entry at SMC Price | Extended >${maxLimitPips}p below with no rejection structure yet |
+| bsl_raid_* (price ABOVE detect Asian high / PDH) | turtle_soup_short | Sweep confirmed; price still within ~${maxLimitPips}p above level OR clear rejection at BSL | Extended >${maxLimitPips}p above with no rejection yet |
+| ssl_near_* / bsl_near_* | turtle soup | Price within ~${mode.entryZonePips ?? 5}p of pool — wait for sweep + false break | No sweep yet — pure anticipation |
 | Sweep + HTF conflict (e.g. BSL + HTF bull) | counter-trend turtle soup | liquidity_sweep + asian_range + ltf_structure (omit htf_bias OR note as risk) | Chase after extended move without structure |
 
-Turtle soup at active sweep ≠ wait for perfect candle — if SMC lists the raid event AND price is in the zone, propose with entry_style "market" and entry = SMC Price.
+Turtle soup: ssl_raid_* means sweep already happened — do NOT require price to still be at the low; evaluate rejection / RTO for entry.
+If prefetch Suggested includes turtle_soup_* and Liquidity lists a raid, weigh SETUP seriously when confluence ≥ min.
 
 MTF S/R: reference map only — pick entry/SL from zones + structure; tag mtf_sr_zone when entry aligns.
 

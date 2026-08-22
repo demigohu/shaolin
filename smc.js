@@ -236,6 +236,7 @@ export async function buildSMCContext({ updateRange = true } = {}) {
     swing,
     fib,
     order_blocks: orderBlocks,
+    asian_for_detect: asianForDetect,
     liquidity_events: liquidity.events,
     liquidity_hints: liquidity.hints,
     suggested_setups: suggestPlaybooks(liquidity.events, amdPhase, h1Struct?.trend),
@@ -271,6 +272,7 @@ function formatTradingWindowLine(ctx) {
 
 export function formatSMCForPrompt(ctx) {
   if (!ctx) return "SMC disabled.";
+  const minAsianWidth = config.smc?.asianRangeMinPips ?? 5;
   const lines = [
     "── SMC / MARKET STRUCTURE (PDF framework) ──",
     `WIB: ${ctx.wib} | Phase: ${ctx.amd_phase}`,
@@ -279,13 +281,41 @@ export function formatSMCForPrompt(ctx) {
     `Price: ${ctx.price ?? "?"}`,
   ];
 
-  if (ctx.asian_range) {
-    const tag = ctx.asian_range.proxy ? " (proxy)"
-      : ctx.asian_range.carried_over ? ` (carry ${ctx.asian_range.carry_from || "prior"})`
+  const sessionAsian = ctx.asian_range;
+  const detectAsian = ctx.asian_for_detect || sessionAsian;
+  const sessionWidth = sessionAsian ? asianRangeWidthPips(sessionAsian) : 0;
+  const detectDiffers = detectAsian && sessionAsian
+    && (detectAsian.high !== sessionAsian.high || detectAsian.low !== sessionAsian.low);
+
+  if (detectDiffers || (sessionAsian && sessionWidth < minAsianWidth)) {
+    if (sessionAsian) {
+      lines.push(`Asian range (session track): ${sessionAsian.low} – ${sessionAsian.high}${sessionWidth < minAsianWidth ? " — too narrow; not used for liquidity" : ""}`);
+    }
+    if (detectAsian) {
+      const tag = detectAsian.proxy || detectAsian.proxy_for_detect ? " (H1/M15 proxy)" : "";
+      lines.push(`Asian range (liquidity detect): ${detectAsian.low} – ${detectAsian.high}${tag} — USE THIS for SSL/BSL raids`);
+    }
+  } else if (sessionAsian) {
+    const tag = sessionAsian.proxy ? " (proxy)"
+      : sessionAsian.carried_over ? ` (carry ${sessionAsian.carry_from || "prior"})`
         : "";
-    lines.push(`Asian range${tag}: ${ctx.asian_range.low} – ${ctx.asian_range.high} (BSL above / SSL below)`);
+    lines.push(`Asian range${tag}: ${sessionAsian.low} – ${sessionAsian.high} (BSL above / SSL below)`);
   } else {
     lines.push("Asian range: not built yet (updates during 07–13 WIB)");
+  }
+
+  if (detectAsian && ctx.price != null) {
+    const distLowP = toPips(ctx.price - detectAsian.low);
+    const distHighP = toPips(detectAsian.high - ctx.price);
+    if (ctx.price < detectAsian.low) {
+      lines.push(`Price ${Math.abs(distLowP)}p below detect low — SSL raid active`);
+    } else if (ctx.price > detectAsian.high) {
+      lines.push(`Price ${Math.abs(distHighP)}p above detect high — BSL raid active`);
+    } else if (Math.abs(distLowP) <= (config.smc?.asianNearPips ?? 5)) {
+      lines.push(`Price ${Math.abs(distLowP)}p from detect low — SSL pool (near)`);
+    } else if (Math.abs(distHighP) <= (config.smc?.asianNearPips ?? 5)) {
+      lines.push(`Price ${Math.abs(distHighP)}p from detect high — BSL pool (near)`);
+    }
   }
 
   if (ctx.swing) {
@@ -308,7 +338,7 @@ export function formatSMCForPrompt(ctx) {
 
   lines.push(`HTF H4: ${ctx.htf.h4_trend} | H1: ${ctx.htf.h1_trend}`);
   if (ctx.liquidity_events.length) {
-    lines.push(`Liquidity: ${ctx.liquidity_events.join(", ")}`);
+    lines.push(`Liquidity: ${ctx.liquidity_events.join(", ")} — authoritative; include liquidity_sweep in confluence when proposing turtle soup`);
   }
   for (const h of ctx.liquidity_hints.slice(0, 4)) {
     lines.push(`  → ${h}`);
