@@ -86,39 +86,61 @@ function readDailyHL(analysis) {
   };
 }
 
+function asianRangeWidthPips(asian) {
+  if (!asian?.high || !asian?.low) return 0;
+  return toPips(asian.high - asian.low);
+}
+
 function detectLiquidityEvents(price, asian, daily) {
   const pip = config.broker.pipSize || 0.1;
+  const nearPips = config.smc?.asianNearPips ?? 5;
   const events = [];
   const hints = [];
 
   if (asian && price != null) {
     const aboveAsian = price > asian.high;
     const belowAsian = price < asian.low;
+    const atAsianHigh = !aboveAsian && !belowAsian && toPips(Math.abs(price - asian.high)) === 0;
+    const atAsianLow = !aboveAsian && !belowAsian && toPips(Math.abs(price - asian.low)) === 0;
     const distHighPips = toPips(Math.abs(price - asian.high));
     const distLowPips = toPips(Math.abs(price - asian.low));
 
     if (aboveAsian) {
       events.push("bsl_raid_asian_high");
       hints.push("BSL raid above Asian high — favor Turtle Soup SHORT or wait for RTO after BMS down");
-    } else if (distHighPips <= 5) {
-      hints.push("Price near Asian high (BSL pool) — watch for sweep");
+    } else if (atAsianHigh || distHighPips <= nearPips) {
+      events.push("bsl_near_asian_high");
+      hints.push("Price at/near Asian high (BSL pool) — watch for sweep or turtle_soup_short on false break");
     }
 
     if (belowAsian) {
       events.push("ssl_raid_asian_low");
       hints.push("SSL raid below Asian low — favor Turtle Soup LONG or wait for RTO after BMS up");
-    } else if (distLowPips <= 5) {
-      hints.push("Price near Asian low (SSL pool) — watch for sweep");
+    } else if (atAsianLow || distLowPips <= nearPips) {
+      events.push("ssl_near_asian_low");
+      hints.push("Price at/near Asian low (SSL pool) — watch for sweep or turtle_soup_long on false break");
     }
   }
 
   if (price != null && daily?.pdh != null && price > daily.pdh) {
     events.push("bsl_raid_pdh");
     hints.push("Above PDH — BSL taken, reversal down possible");
+  } else if (price != null && daily?.pdh != null) {
+    const distPdh = toPips(daily.pdh - price);
+    if (distPdh >= 0 && distPdh <= nearPips) {
+      events.push("bsl_near_pdh");
+      hints.push("Price near PDH — BSL pool");
+    }
   }
   if (price != null && daily?.pdl != null && price < daily.pdl) {
     events.push("ssl_raid_pdl");
     hints.push("Below PDL — SSL taken, reversal up possible");
+  } else if (price != null && daily?.pdl != null) {
+    const distPdl = toPips(price - daily.pdl);
+    if (distPdl >= 0 && distPdl <= nearPips) {
+      events.push("ssl_near_pdl");
+      hints.push("Price near PDL — SSL pool");
+    }
   }
 
   return { events, hints };
@@ -126,10 +148,12 @@ function detectLiquidityEvents(price, asian, daily) {
 
 function suggestPlaybooks(liquidityEvents, amdPhase, h1Trend) {
   const plays = [];
-  if (liquidityEvents.includes("ssl_raid_asian_low") || liquidityEvents.includes("ssl_raid_pdl")) {
+  const ssl = liquidityEvents.some((e) => e.startsWith("ssl_"));
+  const bsl = liquidityEvents.some((e) => e.startsWith("bsl_"));
+  if (ssl) {
     plays.push("turtle_soup_long", "sh_bms_rto", "sms_bms_rto");
   }
-  if (liquidityEvents.includes("bsl_raid_asian_high") || liquidityEvents.includes("bsl_raid_pdh")) {
+  if (bsl) {
     plays.push("turtle_soup_short", "sh_bms_rto", "sms_bms_rto");
   }
   if (amdPhase === "ny_distribution" || amdPhase === "london_manipulation") {
@@ -160,7 +184,12 @@ export async function buildSMCContext({ updateRange = true } = {}) {
 
   // Detect raids against range BEFORE updateAsianRange expands high/low to current price.
   let asian = getAsianRange();
-  const asianForDetect = asian ? { high: asian.high, low: asian.low } : null;
+  let asianForDetect = asian ? { high: asian.high, low: asian.low } : null;
+  const minAsianWidth = config.smc?.asianRangeMinPips ?? 5;
+  if (asianForDetect && asianRangeWidthPips(asianForDetect) < minAsianWidth) {
+    const proxy = bootstrapAsianRangeProxy(h1, m15);
+    if (proxy) asianForDetect = { high: proxy.high, low: proxy.low, proxy_for_detect: true };
+  }
   let liquidity = detectLiquidityEvents(price, asianForDetect, dailyHL);
 
   if (updateRange && price != null) updateAsianRange(price);
@@ -222,7 +251,7 @@ export async function buildSMCContext({ updateRange = true } = {}) {
     });
   }
 
-  log("smc", `Context ${wib.label} ${amdPhase} price=${price} events=${liquidity.events.join(",") || "none"}`);
+  log("smc", `Context ${wib.label} ${amdPhase} price=${price} asian=${asianForDetect ? `${asianForDetect.low}-${asianForDetect.high}` : "?"} events=${liquidity.events.join(",") || "none"}`);
   _lastSMCContext = context;
   return context;
 }
