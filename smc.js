@@ -153,17 +153,25 @@ export async function buildSMCContext({ updateRange = true } = {}) {
     ?? extractPriceFromAnalysis(h1)
     ?? extractPriceFromAnalysis(h4)
     ?? extractPriceFromAnalysis(daily);
-  if (updateRange && price != null) updateAsianRange(price);
-
-  let asian = getAsianRange();
-  if (!asian && config.smc?.bootstrapAsianRange !== false) {
-    asian = bootstrapAsianRangeProxy(h1, m15);
-  }
 
   const dailyHL = readDailyHL(daily);
   const amdPhase = getAMDPhase();
   const wib = getWIBNow();
-  const liquidity = detectLiquidityEvents(price, asian, dailyHL);
+
+  // Detect raids against range BEFORE updateAsianRange expands high/low to current price.
+  let asian = getAsianRange();
+  const asianForDetect = asian ? { high: asian.high, low: asian.low } : null;
+  let liquidity = detectLiquidityEvents(price, asianForDetect, dailyHL);
+
+  if (updateRange && price != null) updateAsianRange(price);
+
+  asian = getAsianRange();
+  if (!asian && config.smc?.bootstrapAsianRange !== false) {
+    asian = bootstrapAsianRangeProxy(h1, m15);
+    if (asian && !liquidity.events.length) {
+      liquidity = detectLiquidityEvents(price, asian, dailyHL);
+    }
+  }
   const h4Struct = readStructure(h4);
   const h1Struct = readStructure(h1);
   const m15SR = readSR(m15);
@@ -243,8 +251,10 @@ export function formatSMCForPrompt(ctx) {
   ];
 
   if (ctx.asian_range) {
-    const proxy = ctx.asian_range.proxy ? " (proxy)" : "";
-    lines.push(`Asian range${proxy}: ${ctx.asian_range.low} – ${ctx.asian_range.high} (BSL above / SSL below)`);
+    const tag = ctx.asian_range.proxy ? " (proxy)"
+      : ctx.asian_range.carried_over ? ` (carry ${ctx.asian_range.carry_from || "prior"})`
+        : "";
+    lines.push(`Asian range${tag}: ${ctx.asian_range.low} – ${ctx.asian_range.high} (BSL above / SSL below)`);
   } else {
     lines.push("Asian range: not built yet (updates during 07–13 WIB)");
   }

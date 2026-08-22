@@ -36,7 +36,7 @@ Active strategy: ${strategy.name} (${strategy.id})
 
   if (agentType === "SCREENER") {
     const maxSl = mode.maxSlPips;
-    const minSl = mode.minSlPips ?? 20;
+    const minSl = mode.minSlPips ?? 15;
     const smcEnabled = config.smc?.enabled !== false;
     const maxMarketPips = config.screening?.maxEntrySlippagePips ?? mode.entryZonePips ?? 3;
     const maxLimitPips = mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25;

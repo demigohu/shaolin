@@ -1,6 +1,6 @@
 import { logAction } from "../logger.js";
 import { createSetup, getOpenSetups } from "../setups.js";
-import { getRecentScreeningDecisions } from "../screening-log.js";
+import { getRecentScreeningDecisions, logProposeBlocked } from "../screening-log.js";
 import { getActiveMode, getCurrentSession } from "../modes.js";
 import { config } from "../config.js";
 import { isStrategyApproved, setActiveStrategy, listStrategies, formatStrategiesList, backtestMcpStrategy, strategyIdFor, getActiveStrategy } from "../strategies.js";
@@ -17,6 +17,13 @@ import * as market from "./market.js";
 import * as backtest from "./backtest.js";
 
 const PROTECTED_TOOLS = new Set(["propose_setup"]);
+
+function recordProposeBlocked(result, args) {
+  if (result?.blocked || result?.skipped) {
+    logProposeBlocked(result, args);
+  }
+  return result;
+}
 
 const toolMap = {
   get_xauusd_mtf: async () => {
@@ -65,12 +72,12 @@ const toolMap = {
   propose_setup: async (args) => {
     const strategyId = args.strategy_id || getActiveStrategy().id;
     if (config.strategy.requireBacktestApproval && !isStrategyApproved(strategyId)) {
-      return {
+      return recordProposeBlocked({
         success: false,
         blocked: true,
         reason: "strategy_not_backtest_approved",
         strategy_id: strategyId,
-      };
+      }, args);
     }
 
     const mode = getActiveMode();
@@ -87,22 +94,22 @@ const toolMap = {
       const noShort = config.screening.rsiNoShortBelow ?? 35;
       const noLong = config.screening.rsiNoLongAbove ?? 65;
       if (args.side === "short" && rsi < noShort) {
-        return {
+        return recordProposeBlocked({
           success: false,
           blocked: true,
           reason: "rsi_oversold_no_short",
           rsi,
           message: `RSI ${rsi} oversold — avoid short scalp (bounce risk). Prefer WATCH or wait for pullback.`,
-        };
+        }, args);
       }
       if (args.side === "long" && rsi > noLong) {
-        return {
+        return recordProposeBlocked({
           success: false,
           blocked: true,
           reason: "rsi_overbought_no_long",
           rsi,
           message: `RSI ${rsi} overbought — avoid long scalp. Prefer WATCH.`,
-        };
+        }, args);
       }
     }
 
@@ -111,25 +118,26 @@ const toolMap = {
       getLastSMCContext(),
     );
     if (!smcCheck.ok) {
-      return {
+      return recordProposeBlocked({
         success: false,
         blocked: true,
         reason: smcCheck.reason,
         message: smcCheck.message,
-      };
+      }, args);
     }
 
     const proposePrice = await resolveProposePrice(market);
     const entryCheck = validateProposedEntry(args, proposePrice, mode);
     if (!entryCheck.ok) {
-      return {
+      return recordProposeBlocked({
         success: false,
         blocked: true,
         reason: entryCheck.reason,
         message: entryCheck.message,
         price_at_propose: entryCheck.price_at_propose,
         entry_distance_pips: entryCheck.distPips,
-      };
+        distPips: entryCheck.distPips,
+      }, args);
     }
 
     const result = createSetup({
@@ -147,7 +155,7 @@ const toolMap = {
       const extra = result.reason === "thesis_cooldown"
         ? { recall: recallForThesis({ side: args.side, entry: args.entry, sl: args.sl, strategy_id: strategyId, mode: mode.id }) }
         : {};
-      return {
+      return recordProposeBlocked({
         success: false,
         skipped: true,
         reason: result.reason,
@@ -168,7 +176,7 @@ const toolMap = {
                 ? `RR ${result.rr_ratio} below min ${result.min_rr}`
                 : undefined,
         ...extra,
-      };
+      }, args);
     }
     return { success: true, setup: result.setup };
   },

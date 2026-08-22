@@ -81,7 +81,15 @@ function extractLastSetupFromMessages(messages) {
 }
 
 export async function runScreeningCycle({ silent = false } = {}) {
-  if (_screeningBusy) return null;
+  if (_screeningBusy) {
+    log("screen", "Screening skipped — previous cycle still running");
+    appendScreeningDecision({
+      action: "WATCH",
+      summary: "Skipped: previous screening cycle still running",
+      reason: "screening_busy",
+    });
+    return null;
+  }
   _screeningBusy = true;
   _screenCycleCount += 1;
   const mode = getActiveMode();

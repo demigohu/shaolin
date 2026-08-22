@@ -24,6 +24,31 @@ function sanitize(value, maxLen = 280) {
   return String(value).replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, maxLen) || null;
 }
 
+export function logProposeBlocked(result, args = {}) {
+  const reason = result.reason || "unknown";
+  const side = args.side ? `${args.side} ` : "";
+  const summary = result.message
+    || `${side}${args.setup_type || "setup"} blocked: ${reason}`;
+  appendScreeningDecision({
+    type: "propose_blocked",
+    action: "BLOCKED",
+    summary,
+    reason: [
+      reason,
+      result.sl_pips != null ? `sl=${result.sl_pips}p` : null,
+      result.min_sl_pips != null ? `min_sl=${result.min_sl_pips}p` : null,
+      result.distPips != null ? `entry_dist=${result.distPips}p` : null,
+      result.entry_distance_pips != null ? `entry_dist=${result.entry_distance_pips}p` : null,
+    ].filter(Boolean).join(" | "),
+    metrics: {
+      setup_type: args.setup_type,
+      side: args.side,
+      entry: args.entry,
+      sl: args.sl,
+    },
+  });
+}
+
 export function appendScreeningDecision(entry) {
   const data = load();
   const decision = {

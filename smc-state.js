@@ -26,10 +26,15 @@ function save(data) {
 
 export function getAsianRange() {
   const data = load();
-  const { date } = getWIBNow();
+  const { date, hour } = getWIBNow();
   const range = data.asianRange;
-  if (!range || range.date !== date) return null;
-  return range;
+  if (!range) return null;
+  if (range.date === date) return range;
+  // 00:00–06:59 WIB: keep prior session range until today's Asian builds (07:00+).
+  if (hour < 7) {
+    return { ...range, carried_over: true, carry_from: range.date };
+  }
+  return null;
 }
 
 export function updateAsianRange(price) {
