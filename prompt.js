@@ -35,6 +35,7 @@ Active strategy: ${strategy.name} (${strategy.id})
 
   if (agentType === "SCREENER") {
     const smcEnabled = config.smc?.enabled !== false;
+    const prefetchBlock = smcEnabled && context.prefetchSummary
       ? `${context.prefetchSummary}
 
 PREFETCH ACTIVE — SMC + MTF SNR map loaded above.
