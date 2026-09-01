@@ -33,17 +33,25 @@ export function getLastSMCContext() {
 }
 
 export const SETUP_TYPES = [
-  "turtle_soup_long",   // SSL raid → long
-  "turtle_soup_short",  // BSL raid → short
-  "sh_bms_rto",         // Stop hunt + BMS + return to OB
-  "sms_bms_rto",        // Failure swing + BMS + RTO
-  "amd_distribution",   // Post-manipulation distribution leg
-  "fib_retrace",        // BMS + 50–72% fib retrace entry
+  "dip_reclaim_long",   // DIP → structure intact → absorption → reclaim → long
+  "dip_reclaim_short",  // Rally → structure intact → distribution → reclaim → short
+  "fib_retrace",        // Entry at fib SNR (0.5–0.786) after impulse
+  "snr_bounce_long",    // Demand at MTF support + confirmation
+  "snr_bounce_short",   // Supply at MTF resistance + confirmation
+  "turtle_soup_long",   // SSL raid / false break (PDF)
+  "turtle_soup_short",  // BSL raid / false break (PDF)
+  "sh_bms_rto",
+  "sms_bms_rto",
+  "amd_distribution",
 ];
 
 export const CONFLUENCE_TAGS = [
   "htf_bias",
   "ltf_structure",
+  "snr_zone",
+  "fib_retrace",
+  "absorption",
+  "reclaim",
   "liquidity_sweep",
   "order_block_rto",
   "fib_ote",
@@ -322,7 +330,14 @@ export function formatSMCForPrompt(ctx) {
     lines.push(`Swing H/L: ${ctx.swing.swing_low} – ${ctx.swing.swing_high}`);
   }
   if (ctx.fib) {
-    lines.push(`Fib OTE (0.618–0.72): ${ctx.fib.ote_zone.low.toFixed(2)} – ${ctx.fib.ote_zone.high.toFixed(2)} | in zone: ${ctx.fib.in_ote_zone ? "YES" : `no (${ctx.fib.dist_to_ote_pips}p away)`}`);
+    const lv = ctx.fib.levels || {};
+    const fibParts = ["0.382", "0.5", "0.618", "0.786"]
+      .filter((k) => lv[k] != null)
+      .map((k) => `${k}=${lv[k].toFixed(2)}`);
+    if (fibParts.length) {
+      lines.push(`Fib retrace (${ctx.fib.trend_for_fib}): ${fibParts.join(" | ")}`);
+    }
+    lines.push(`OTE 0.618–0.72: ${ctx.fib.ote_zone.low.toFixed(2)} – ${ctx.fib.ote_zone.high.toFixed(2)} | in zone: ${ctx.fib.in_ote_zone ? "YES" : `no (${ctx.fib.dist_to_ote_pips}p away)`}`);
   }
   if (ctx.structure) {
     lines.push(`Structure: ${ctx.structure.bias}${ctx.structure.bms_hint ? ` | ${ctx.structure.bms_hint}` : ""}${ctx.structure.sms_hint ? ` | ${ctx.structure.sms_hint}` : ""}`);
@@ -344,24 +359,27 @@ export function formatSMCForPrompt(ctx) {
     lines.push(`  → ${h}`);
   }
 
-  lines.push("", "SETUP TYPES (propose_setup.setup_type):");
-  lines.push("  turtle_soup_long — SSL raid, false break down, long");
-  lines.push("  turtle_soup_short — BSL raid, false break up, short");
-  lines.push("  sh_bms_rto — Stop hunt + break structure + return to order block");
-  lines.push("  sms_bms_rto — Failure swing + BMS + RTO");
-  lines.push("  amd_distribution — Trade distribution leg after London manip");
-  lines.push("  fib_retrace — Entry on 50–72% retrace after BMS (not chase)");
+  lines.push("", "DIP → ENTRY checklist (long; mirror for short):");
+  lines.push("  1 DIP — pullback in HTF trend (not random noise)");
+  lines.push("  2 STRUCTURE — HTF intact (no BOS against your bias)");
+  lines.push("  3 ABSORPTION — wick/OB/RSI stall at SNR or fib (smart money in)");
+  lines.push("  4 RECLAIM — close back above/below key level (failed breakdown/breakout)");
+  lines.push("  5 ENTRY — market at reclaim or limit at fib 0.5–0.786 / SNR");
+
+  lines.push("", "SETUP TYPES (you choose — cite in propose_setup):");
+  lines.push("  dip_reclaim_long | dip_reclaim_short — core DIP framework");
+  lines.push("  fib_retrace | snr_bounce_long | snr_bounce_short — SNR + fib entry");
+  lines.push("  turtle_soup_long | turtle_soup_short — liquidity false break (PDF)");
+  lines.push("  sh_bms_rto | sms_bms_rto | amd_distribution — PDF advanced");
 
   if (ctx.mtf_zones) {
     lines.push(formatMtfZonesForPrompt(ctx.mtf_zones));
   }
 
-  lines.push("", "RULES:");
-  lines.push("- Min 2 confluence_factors from: htf_bias, mtf_sr_zone, liquidity_sweep, order_block_rto, fib_ote, london_open, ny_open, asian_range, session_amd");
-  lines.push("- Do NOT trend-follow short into SSL / oversold (RSI<35) — prefer turtle_soup_long or WATCH");
-  lines.push("- Do NOT trend-follow long into BSL / overbought (RSI>65)");
-  lines.push("- After BMS: wait retracement to fib 0.5–0.72 or OB — no chase entries");
-  lines.push(`- Suggested now: ${ctx.suggested_setups.length ? ctx.suggested_setups.join(", ") : "none — WATCH"}`);
+  lines.push("", "YOU set SL/TP from SNR + fib — not from config defaults.");
+  lines.push("- SL: beyond invalidation (below demand / above supply you cite)");
+  lines.push("- TP: next SNR levels or fib extension — provide tp_levels[] on propose_setup");
+  lines.push(`- Suggested plays: ${ctx.suggested_setups.length ? ctx.suggested_setups.join(", ") : "none — WATCH"}`);
 
   return lines.join("\n");
 }
@@ -391,7 +409,7 @@ export function validateSMCSetup(args, ctx = null) {
   }
 
   if (config.smc?.requireTradingWindow && ctx && !ctx.trading_window) {
-    const allowedOffHours = ["turtle_soup_long", "turtle_soup_short"].includes(setupType)
+    const allowedOffHours = ["turtle_soup_long", "turtle_soup_short", "dip_reclaim_long", "dip_reclaim_short"].includes(setupType)
       && ctx.liquidity_events?.length > 0;
     if (!allowedOffHours) {
       return {

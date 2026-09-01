@@ -72,6 +72,7 @@
   "screening": {
     "maxSetupsPerDay": 8,
     "skipWeekends": true,
+    "llmOwnsTpSl": true,
     "newsBlackoutMinutes": 0,
     "nearTpSlAlertPct": 80,
     "requireEntryNearPrice": true,

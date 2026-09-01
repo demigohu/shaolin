@@ -162,8 +162,6 @@ export async function runScreeningCycle({ silent = false } = {}) {
       return msg;
     }
 
-    const maxSl = mode.maxSlPips ?? 40;
-
     let smcSummary = null;
     if (config.smc?.enabled !== false) {
       try {
@@ -175,10 +173,9 @@ export async function runScreeningCycle({ silent = false } = {}) {
     }
 
     const goal = [
-      `Run XAUUSD ${mode.label} SMC screening (Market Structure PDF).`,
-      `TFs: ${mode.timeframes.join(", ")}. Combined: ${mode.combinedTimeframe}.`,
-      `If SETUP: setup_type + ≥2 confluence_factors. SL max ${maxSl} pips. Min conf ${mode.minConfidence}%, RR ${mode.minRrRatio}.`,
-      `Prefer turtle soup / RTO / fib retrace — no trend chase after liquidity sweep.`,
+      `Run XAUUSD ${mode.label} screening — DIP→ENTRY framework (Market Structure PDF).`,
+      `Use prefetch SNR + fib. YOU set entry, SL, tp_levels from structure.`,
+      `Walk: DIP → structure intact → absorption → reclaim → SETUP, else WATCH.`,
     ].join(" ");
 
     const { content, messages } = await agentLoop(

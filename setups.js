@@ -2,7 +2,7 @@ import fs from "fs";
 import { repoPath } from "./repo-root.js";
 import { log } from "./logger.js";
 import { getActiveMode } from "./modes.js";
-import { computeTpLevels, computeRrRatio, roundToPips, toPips } from "./tools/price.js";
+import { computeTpLevels, computeRrRatio, normalizeTpLevels, roundToPips, toPips } from "./tools/price.js";
 import { config } from "./config.js";
 import { isThesisOnCooldown } from "./setup-memory.js";
 import { getActiveStrategy } from "./strategies.js";
@@ -106,7 +106,8 @@ export function createSetup(input) {
   }
 
   const partialTp = mode.partialTp || [];
-  const tpLevels = computeTpLevels(side, entry, sl, partialTp);
+  const llmTp = normalizeTpLevels(side, entry, sl, input.tp_levels);
+  const tpLevels = llmTp.length ? llmTp : computeTpLevels(side, entry, sl, partialTp);
   const tpFinal = tpLevels.length ? tpLevels[tpLevels.length - 1].price : Number(input.tp);
   const rr = computeRrRatio(side, entry, sl, tpFinal);
 
@@ -131,7 +132,7 @@ export function createSetup(input) {
 
   const slPips = toPips(Math.abs(entry - sl));
   const maxSl = mode.maxSlPips;
-  const minSl = mode.minSlPips;
+  const minSl = config.screening?.llmOwnsTpSl === false ? mode.minSlPips : null;
   if (maxSl != null && slPips > maxSl) {
     return { skipped: true, reason: "sl_too_wide", sl_pips: slPips, max_sl_pips: maxSl };
   }
@@ -144,7 +145,7 @@ export function createSetup(input) {
     };
   }
 
-  const minRr = mode.minRrRatio ?? 1.2;
+  const minRr = config.screening?.llmOwnsTpSl === false ? (mode.minRrRatio ?? 1.2) : 0;
   if (minRr > 0 && rr < minRr) {
     return { skipped: true, reason: "rr_too_low", rr_ratio: rr, min_rr: minRr };
   }

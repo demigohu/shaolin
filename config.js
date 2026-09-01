@@ -99,6 +99,7 @@ export const config = {
     maxLimitEntryPips: u.screening?.maxLimitEntryPips ?? null,
     maxStaleDistancePips: u.screening?.maxStaleDistancePips ?? 15,
     skipWeekends: u.screening?.skipWeekends !== false,
+    llmOwnsTpSl: u.screening?.llmOwnsTpSl !== false,
     slStructureBufferPips: u.screening?.slStructureBufferPips ?? 3,
     minSlPipsBySetup: u.screening?.minSlPipsBySetup ?? {
       turtle_soup_long: 20,

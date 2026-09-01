@@ -31,14 +31,18 @@ export function computeFibOte(swing, trend, price) {
 
   const levels = trend === "Bearish" || trend === "bearish"
     ? {
+        "0.382": lo + diff * 0.382,
         "0.5": lo + diff * 0.5,
         "0.618": lo + diff * 0.618,
         "0.72": lo + diff * 0.72,
+        "0.786": lo + diff * 0.786,
       }
     : {
+        "0.382": hi - diff * 0.382,
         "0.5": hi - diff * 0.5,
         "0.618": hi - diff * 0.618,
         "0.72": hi - diff * 0.72,
+        "0.786": hi - diff * 0.786,
       };
 
   const zoneLow = Math.min(levels["0.618"], levels["0.72"]);

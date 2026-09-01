@@ -69,32 +69,54 @@ export const tools = [
     type: "function",
     function: {
       name: "propose_setup",
-      description: "Log SMC setup. Requires setup_type + confluence_factors (min 2). Entry on RTO/fib retrace — not chase.",
+      description: "Log setup with YOUR entry, SL, and tp_levels from SNR/fib/structure. Walk DIP→ENTRY chain before calling.",
       parameters: {
         type: "object",
         properties: {
           side: { type: "string", enum: ["long", "short"] },
           entry: { type: "number" },
-          sl: { type: "number" },
+          sl: { type: "number", description: "Stop beyond invalidation level you cite in reason" },
+          tp_levels: {
+            type: "array",
+            description: "Take-profit ladder at SNR/fib targets (required on SETUP)",
+            items: {
+              type: "object",
+              properties: {
+                price: { type: "number" },
+                close_pct: { type: "number", description: "Percent of position to close at this TP" },
+                rr: { type: "number", description: "Optional RR label for logging" },
+              },
+              required: ["price"],
+            },
+          },
           confidence: { type: "number", description: "0-100" },
           setup_type: {
             type: "string",
-            enum: ["turtle_soup_long", "turtle_soup_short", "sh_bms_rto", "sms_bms_rto", "amd_distribution", "fib_retrace"],
+            enum: [
+              "dip_reclaim_long", "dip_reclaim_short",
+              "fib_retrace", "snr_bounce_long", "snr_bounce_short",
+              "turtle_soup_long", "turtle_soup_short",
+              "sh_bms_rto", "sms_bms_rto", "amd_distribution",
+            ],
           },
           confluence_factors: {
             type: "array",
             items: {
               type: "string",
-              enum: ["htf_bias", "ltf_structure", "liquidity_sweep", "order_block_rto", "fib_ote", "london_open", "ny_open", "asian_range", "session_amd", "news_catalyst", "mtf_sr_zone"],
+              enum: [
+                "htf_bias", "ltf_structure", "snr_zone", "fib_retrace", "absorption", "reclaim",
+                "liquidity_sweep", "order_block_rto", "fib_ote", "london_open", "ny_open",
+                "asian_range", "session_amd", "news_catalyst", "mtf_sr_zone",
+              ],
             },
           },
           bias: { type: "string" },
-          reason: { type: "string" },
+          reason: { type: "string", description: "Must cite SNR/fib levels used for entry, SL, TP" },
           thesis_id: { type: "string", description: "Short thesis identifier for dedup" },
           entry_style: {
             type: "string",
             enum: ["market", "limit"],
-            description: "market = enter now near live price; limit = wait for retrace to entry level",
+            description: "market = reclaim now; limit = fib/SNR retrace",
           },
           risks: { type: "array", items: { type: "string" } },
           screening_snapshot: {
@@ -102,7 +124,7 @@ export const tools = [
             description: "Optional screening signals (mtf_net_score, rsi, news_sentiment_score, etc.)",
           },
         },
-        required: ["side", "entry", "sl", "confidence", "reason", "setup_type", "confluence_factors"],
+        required: ["side", "entry", "sl", "tp_levels", "confidence", "reason", "setup_type", "confluence_factors"],
         additionalProperties: false,
       },
     },

@@ -12,7 +12,7 @@ import {
   extractSignalsFromCombined,
 } from "../signal-tracker.js";
 import { buildSMCContext, validateSMCSetup, getLastSMCContext, formatSMCForPrompt } from "../smc.js";
-import { resolveProposePrice, validateProposedEntry, validateProposedSl } from "./setup-gates.js";
+import { resolveProposePrice, validateProposedEntry, validateProposedSl, validateProposedTp } from "./setup-gates.js";
 import * as market from "./market.js";
 import * as backtest from "./backtest.js";
 
@@ -160,9 +160,20 @@ const toolMap = {
       }, args);
     }
 
+    const tpCheck = validateProposedTp({ ...args, entry: entryCheck.entry ?? args.entry });
+    if (!tpCheck.ok) {
+      return recordProposeBlocked({
+        success: false,
+        blocked: true,
+        reason: tpCheck.reason,
+        message: tpCheck.message,
+      }, args);
+    }
+
     const result = createSetup({
       ...args,
       entry: entryCheck.entry ?? args.entry,
+      tp_levels: tpCheck.tp_levels ?? args.tp_levels,
       setup_type: smcCheck.setup_type || args.setup_type,
       confluence_factors: smcCheck.confluence || args.confluence_factors,
       session: getCurrentSession(),

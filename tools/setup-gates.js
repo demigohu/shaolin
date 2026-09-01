@@ -1,13 +1,17 @@
 import { config } from "../config.js";
-import { roundToPips, toPips } from "./price.js";
+import { roundToPips, toPips, normalizeTpLevels } from "./price.js";
 import { getLastSMCContext } from "../smc.js";
 
 const STRUCTURE_SL_SETUPS = new Set([
+  "dip_reclaim_long",
+  "dip_reclaim_short",
+  "fib_retrace",
+  "snr_bounce_long",
+  "snr_bounce_short",
   "turtle_soup_long",
   "turtle_soup_short",
   "sh_bms_rto",
   "sms_bms_rto",
-  "fib_retrace",
 ]);
 
 function resolveMinSlPips(setupType, mode) {
@@ -59,7 +63,8 @@ export function validateProposedSl(args, ctx, mode) {
   }
 
   const pip = config.broker.pipSize || 0.1;
-  const minSl = resolveMinSlPips(args.setup_type, mode);
+  const llmOwns = config.screening?.llmOwnsTpSl !== false;
+  const minSl = llmOwns ? 3 : resolveMinSlPips(args.setup_type, mode);
   const maxSl = mode.maxSlPips ?? 40;
   const bufferPips = config.screening?.slStructureBufferPips ?? 3;
   const slPips = toPips(Math.abs(entry - sl));
@@ -76,7 +81,9 @@ export function validateProposedSl(args, ctx, mode) {
       reason: "sl_too_tight",
       sl_pips: slPips,
       min_sl_pips: minSl,
-      message: `SL ${slPips}p too tight (min ${minSl}p for ${args.setup_type || "setup"}) — place below next structure, not on entry zone.`,
+      message: llmOwns
+        ? "SL on wrong side of entry or too tight — place below/above structure you cite in reason."
+        : `SL ${slPips}p too tight (min ${minSl}p) — place below next structure level.`,
     };
   }
   if (maxSl != null && slPips > maxSl) {
@@ -89,7 +96,7 @@ export function validateProposedSl(args, ctx, mode) {
     };
   }
 
-  if (!STRUCTURE_SL_SETUPS.has(args.setup_type) || !ctx) {
+  if (llmOwns || !STRUCTURE_SL_SETUPS.has(args.setup_type) || !ctx) {
     return { ok: true, sl_pips: slPips };
   }
 
@@ -160,7 +167,35 @@ export function validateProposedSl(args, ctx, mode) {
   return { ok: true, sl_pips: slPips };
 }
 
-const LIMIT_SETUP_TYPES = new Set(["fib_retrace", "sh_bms_rto", "sms_bms_rto"]);
+export function validateProposedTp(args) {
+  const entry = Number(args.entry);
+  const sl = Number(args.sl);
+  const side = args.side;
+  if (!Array.isArray(args.tp_levels) || !args.tp_levels.length) {
+    return { ok: true, tp_source: "default" };
+  }
+
+  const normalized = normalizeTpLevels(side, entry, sl, args.tp_levels);
+  if (!normalized.length) {
+    return {
+      ok: false,
+      reason: "invalid_tp_levels",
+      message: "tp_levels must be prices on the profit side of entry (long: above entry, short: below).",
+    };
+  }
+
+  return { ok: true, tp_source: "llm", tp_levels: normalized };
+}
+
+const LIMIT_SETUP_TYPES = new Set([
+  "fib_retrace",
+  "dip_reclaim_long",
+  "dip_reclaim_short",
+  "snr_bounce_long",
+  "snr_bounce_short",
+  "sh_bms_rto",
+  "sms_bms_rto",
+]);
 
 export async function resolveProposePrice(market) {
   const ctx = getLastSMCContext();
@@ -174,6 +209,32 @@ export async function resolveProposePrice(market) {
 }
 
 export function validateProposedEntry(args, price, mode) {
+  const llmOwns = config.screening?.llmOwnsTpSl !== false;
+  const entry = Number(args.entry);
+  const entryStyle = args.entry_style === "limit" || args.entry_style === "market"
+    ? args.entry_style
+    : (llmOwns && LIMIT_SETUP_TYPES.has(args.setup_type) ? "limit" : "market");
+
+  if (llmOwns) {
+    if (!Number.isFinite(entry)) {
+      return { ok: false, reason: "invalid_entry", message: "Entry price required." };
+    }
+    if (entryStyle === "market" && price == null) {
+      return {
+        ok: false,
+        reason: "no_price",
+        message: "Market entry needs live price — WATCH or use limit at fib/SNR.",
+      };
+    }
+    return {
+      ok: true,
+      entry_style: entryStyle,
+      entry,
+      distPips: price != null ? toPips(Math.abs(price - entry)) : null,
+      price_at_propose: price,
+    };
+  }
+
   const zonePips = mode.entryZonePips ?? 3;
   const maxMarketPips = config.screening?.maxEntrySlippagePips ?? zonePips;
   const maxLimitPips = mode.maxLimitEntryPips
@@ -185,8 +246,8 @@ export function validateProposedEntry(args, price, mode) {
   if (config.screening?.requireEntryNearPrice === false) {
     return {
       ok: true,
-      entry_style: args.entry_style || "market",
-      distPips: price != null ? toPips(Math.abs(Number(args.entry) - price)) : null,
+      entry_style: entryStyle,
+      distPips: price != null ? toPips(Math.abs(entry - price)) : null,
       price_at_propose: price,
     };
   }
@@ -199,18 +260,16 @@ export function validateProposedEntry(args, price, mode) {
     };
   }
 
-  const entry = Number(args.entry);
   const distPips = toPips(Math.abs(price - entry));
-  let entryStyle = args.entry_style;
+  let resolvedStyle = entryStyle;
 
-  if (!entryStyle || !["limit", "market"].includes(entryStyle)) {
-    if (distPips <= maxMarketPips) entryStyle = "market";
-    else if (LIMIT_SETUP_TYPES.has(args.setup_type)) entryStyle = "limit";
-    else entryStyle = "market";
+  if (!args.entry_style || !["limit", "market"].includes(args.entry_style)) {
+    if (distPips <= maxMarketPips) resolvedStyle = "market";
+    else if (LIMIT_SETUP_TYPES.has(args.setup_type)) resolvedStyle = "limit";
+    else resolvedStyle = "market";
   }
 
-  if (entryStyle === "market") {
-    // Market = enter now at live price; LLM often passes a zone level instead of the quote.
+  if (resolvedStyle === "market") {
     if (distPips > maxMarketPips) {
       const maxSnap = maxLimitPips;
       if (distPips <= maxSnap) {
@@ -229,7 +288,7 @@ export function validateProposedEntry(args, price, mode) {
         message: `Market entry must be within ${maxMarketPips}p of price ${price} (entry ${entry} is ${distPips}p away). Use entry_style "limit" for retrace OR WATCH.`,
         distPips,
         price_at_propose: price,
-        entry_style: entryStyle,
+        entry_style: resolvedStyle,
       };
     }
   } else if (distPips > maxLimitPips) {
@@ -239,13 +298,13 @@ export function validateProposedEntry(args, price, mode) {
       message: `Limit entry ${distPips}p from price (max ${maxLimitPips}p). Too far to wait — WATCH for closer level.`,
       distPips,
       price_at_propose: price,
-      entry_style: entryStyle,
+      entry_style: resolvedStyle,
     };
   }
 
   return {
     ok: true,
-    entry_style: entryStyle,
+    entry_style: resolvedStyle,
     distPips,
     price_at_propose: price,
   };
