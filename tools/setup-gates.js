@@ -54,7 +54,7 @@ function findStructureCeiling(entry, ctx, zonePips = 2) {
   return levels.length ? Math.min(...levels) : null;
 }
 
-export function validateProposedSl(args, ctx, mode) {
+export function validateProposedSl(args, _ctx, mode) {
   const entry = Number(args.entry);
   const sl = Number(args.sl);
   const side = args.side;
@@ -62,11 +62,7 @@ export function validateProposedSl(args, ctx, mode) {
     return { ok: false, reason: "invalid_sl", message: "Invalid entry or SL." };
   }
 
-  const pip = config.broker.pipSize || 0.1;
   const llmOwns = config.screening?.llmOwnsTpSl !== false;
-  const minSl = llmOwns ? 3 : resolveMinSlPips(args.setup_type, mode);
-  const maxSl = mode.maxSlPips ?? 40;
-  const bufferPips = config.screening?.slStructureBufferPips ?? 3;
   const slPips = toPips(Math.abs(entry - sl));
 
   if (side === "long" && sl >= entry) {
@@ -75,15 +71,24 @@ export function validateProposedSl(args, ctx, mode) {
   if (side === "short" && sl <= entry) {
     return { ok: false, reason: "sl_wrong_side", message: "Short SL must be above entry." };
   }
+
+  if (llmOwns) {
+    return { ok: true, sl_pips: slPips };
+  }
+
+  const pip = config.broker.pipSize || 0.1;
+  const minSl = resolveMinSlPips(args.setup_type, mode);
+  const maxSl = mode.maxSlPips ?? 40;
+  const bufferPips = config.screening?.slStructureBufferPips ?? 3;
+  const ctx = _ctx;
+
   if (slPips < minSl) {
     return {
       ok: false,
       reason: "sl_too_tight",
       sl_pips: slPips,
       min_sl_pips: minSl,
-      message: llmOwns
-        ? "SL on wrong side of entry or too tight — place below/above structure you cite in reason."
-        : `SL ${slPips}p too tight (min ${minSl}p) — place below next structure level.`,
+      message: `SL ${slPips}p too tight (min ${minSl}p) — place below next structure level.`,
     };
   }
   if (maxSl != null && slPips > maxSl) {
@@ -96,7 +101,7 @@ export function validateProposedSl(args, ctx, mode) {
     };
   }
 
-  if (llmOwns || !STRUCTURE_SL_SETUPS.has(args.setup_type) || !ctx) {
+  if (!STRUCTURE_SL_SETUPS.has(args.setup_type) || !ctx) {
     return { ok: true, sl_pips: slPips };
   }
 
@@ -168,15 +173,19 @@ export function validateProposedSl(args, ctx, mode) {
 }
 
 export function validateProposedTp(args) {
+  const llmOwns = config.screening?.llmOwnsTpSl !== false;
+  if (!Array.isArray(args.tp_levels) || !args.tp_levels.length) {
+    return { ok: true, tp_source: llmOwns ? "llm_none" : "default" };
+  }
+
   const entry = Number(args.entry);
   const sl = Number(args.sl);
   const side = args.side;
-  if (!Array.isArray(args.tp_levels) || !args.tp_levels.length) {
-    return { ok: true, tp_source: "default" };
-  }
-
   const normalized = normalizeTpLevels(side, entry, sl, args.tp_levels);
   if (!normalized.length) {
+    if (llmOwns) {
+      return { ok: true, tp_source: "llm_none" };
+    }
     return {
       ok: false,
       reason: "invalid_tp_levels",
@@ -218,13 +227,6 @@ export function validateProposedEntry(args, price, mode) {
   if (llmOwns) {
     if (!Number.isFinite(entry)) {
       return { ok: false, reason: "invalid_entry", message: "Entry price required." };
-    }
-    if (entryStyle === "market" && price == null) {
-      return {
-        ok: false,
-        reason: "no_price",
-        message: "Market entry needs live price — WATCH or use limit at fib/SNR.",
-      };
     }
     return {
       ok: true,

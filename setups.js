@@ -106,10 +106,15 @@ export function createSetup(input) {
   }
 
   const partialTp = mode.partialTp || [];
+  const llmOwns = config.screening?.llmOwnsTpSl !== false;
   const llmTp = normalizeTpLevels(side, entry, sl, input.tp_levels);
-  const tpLevels = llmTp.length ? llmTp : computeTpLevels(side, entry, sl, partialTp);
-  const tpFinal = tpLevels.length ? tpLevels[tpLevels.length - 1].price : Number(input.tp);
-  const rr = computeRrRatio(side, entry, sl, tpFinal);
+  const tpLevels = llmTp.length
+    ? llmTp
+    : (llmOwns ? [] : computeTpLevels(side, entry, sl, partialTp));
+  const tpFinal = tpLevels.length
+    ? tpLevels[tpLevels.length - 1].price
+    : (llmOwns ? null : Number(input.tp));
+  const rr = tpFinal != null ? computeRrRatio(side, entry, sl, tpFinal) : null;
 
   const candidate = {
     side,
@@ -131,23 +136,25 @@ export function createSetup(input) {
   }
 
   const slPips = toPips(Math.abs(entry - sl));
-  const maxSl = mode.maxSlPips;
-  const minSl = config.screening?.llmOwnsTpSl === false ? mode.minSlPips : null;
-  if (maxSl != null && slPips > maxSl) {
-    return { skipped: true, reason: "sl_too_wide", sl_pips: slPips, max_sl_pips: maxSl };
-  }
-  if (minSl != null && slPips < minSl) {
-    return {
-      skipped: true,
-      reason: "sl_too_tight",
-      sl_pips: slPips,
-      min_sl_pips: minSl,
-    };
-  }
+  if (!llmOwns) {
+    const maxSl = mode.maxSlPips;
+    const minSl = mode.minSlPips;
+    if (maxSl != null && slPips > maxSl) {
+      return { skipped: true, reason: "sl_too_wide", sl_pips: slPips, max_sl_pips: maxSl };
+    }
+    if (minSl != null && slPips < minSl) {
+      return {
+        skipped: true,
+        reason: "sl_too_tight",
+        sl_pips: slPips,
+        min_sl_pips: minSl,
+      };
+    }
 
-  const minRr = config.screening?.llmOwnsTpSl === false ? (mode.minRrRatio ?? 1.2) : 0;
-  if (minRr > 0 && rr < minRr) {
-    return { skipped: true, reason: "rr_too_low", rr_ratio: rr, min_rr: minRr };
+    const minRr = mode.minRrRatio ?? 1.2;
+    if (minRr > 0 && rr != null && rr < minRr) {
+      return { skipped: true, reason: "rr_too_low", rr_ratio: rr, min_rr: minRr };
+    }
   }
 
   if (isThesisOnCooldown(candidate)) {

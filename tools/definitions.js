@@ -124,7 +124,7 @@ export const tools = [
             description: "Optional screening signals (mtf_net_score, rsi, news_sentiment_score, etc.)",
           },
         },
-        required: ["side", "entry", "sl", "tp_levels", "confidence", "reason", "setup_type", "confluence_factors"],
+        required: ["side", "entry", "sl", "confidence", "reason", "setup_type", "confluence_factors"],
         additionalProperties: false,
       },
     },

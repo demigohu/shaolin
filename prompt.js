@@ -22,7 +22,7 @@ Symbol (data): ${market.dataExchange}:${market.dataSymbol}
 Broker display: ${broker.name} | pipSize ${broker.pipSize} | offset ${broker.priceOffset}
 Active mode: ${mode.id} (${mode.label}) | session: ${session}
 Timeframes: ${mode.timeframes.join(" → ")}
-Min confidence: ${mode.minConfidence}% | Min RR: ${mode.minRrRatio}
+Min confidence: ${mode.minConfidence}% (self-assessed — not config-gated when llmOwnsTpSl)
 
 HARD RULES:
 - You NEVER execute trades or claim you entered/exited on a broker.
