@@ -153,7 +153,26 @@ export function createSetup(input) {
 
     const minRr = mode.minRrRatio ?? 1.2;
     if (minRr > 0 && rr != null && rr < minRr) {
-      return { skipped: true, reason: "rr_too_low", rr_ratio: rr, min_rr: minRr };
+      const riskPips = toPips(Math.abs(entry - sl));
+      return {
+        skipped: true,
+        reason: "rr_too_low",
+        rr_ratio: rr,
+        min_rr: minRr,
+        message: `RR ${rr} < ${minRr}. Extend TP to next SNR/fib (≥${Math.ceil(riskPips * minRr)}p) — do not tighten SL.`,
+      };
+    }
+  } else if (config.screening?.enforceMinRr !== false) {
+    const minRr = mode.minRrRatio ?? 1.2;
+    if (minRr > 0 && (rr == null || rr < minRr)) {
+      const riskPips = toPips(Math.abs(entry - sl));
+      return {
+        skipped: true,
+        reason: "rr_too_low",
+        rr_ratio: rr,
+        min_rr: minRr,
+        message: `RR ${rr ?? "?"} < ${minRr}. Extend TP final (≥${Math.ceil(riskPips * minRr)}p from entry) — keep SL at structure ${sl}.`,
+      };
     }
   }
 
@@ -207,6 +226,7 @@ export function createSetup(input) {
     remaining_pct: 100,
     screening_snapshot: input.screening_snapshot || {},
     reason: sanitize(input.reason, 500),
+    sl_anchor: sanitize(input.sl_anchor, 120),
     risks: Array.isArray(input.risks) ? input.risks.map((r) => sanitize(r, 140)).filter(Boolean).slice(0, 6) : [],
     thesis_id: sanitize(input.thesis_id || input.reason?.slice(0, 80), 120),
     setup_type: sanitize(input.setup_type, 40),

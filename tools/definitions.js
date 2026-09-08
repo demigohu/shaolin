@@ -75,7 +75,11 @@ export const tools = [
         properties: {
           side: { type: "string", enum: ["long", "short"] },
           entry: { type: "number" },
-          sl: { type: "number", description: "Stop beyond invalidation level you cite in reason" },
+          sl: { type: "number", description: "Stop beyond structure invalidation (may be wide if next SNR/fib is far)" },
+          sl_anchor: {
+            type: "string",
+            description: "Structure label for SL, e.g. 'below H1 support 2595' or 'above BSL sweep 4378'",
+          },
           tp_levels: {
             type: "array",
             description: "Take-profit ladder at SNR/fib targets (required on SETUP)",
@@ -111,7 +115,7 @@ export const tools = [
             },
           },
           bias: { type: "string" },
-          reason: { type: "string", description: "Must cite SNR/fib levels used for entry, SL, TP" },
+          reason: { type: "string", description: "Required: cite entry/SL/TP structure levels with prices (support, resistance, fib, sweep)" },
           thesis_id: { type: "string", description: "Short thesis identifier for dedup" },
           entry_style: {
             type: "string",

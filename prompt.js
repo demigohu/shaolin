@@ -83,12 +83,16 @@ ENTRY (SNR + Fib):
 - Or market on reclaim candle after absorption at demand/supply.
 - snr_bounce_* = entry at MTF zone; fib_retrace = entry at fib level; dip_reclaim_* = full chain confirmed.
 
-TP / SL (YOU define — required on SETUP):
-- SL: beyond invalidation — below demand zone / sweep low (long) or above supply (short). Cite the level in reason.
-- TP: tp_levels array — target next SNR (prefetch support/resistance stack) or fib extension.
-  Example: [{ "price": 2610.5, "close_pct": 50 }, { "price": 2615.0, "close_pct": 50 }]
-- Do NOT use arbitrary round numbers — anchor to SNR/fib from data.
-- Partial take-profit splits are your choice (50/50, 60/40, etc.).
+TP / SL — structure-first (YOU define; width follows structure, not a pip template):
+- SL goes BEYOND the invalidation level — next support (long) or resistance (short), sweep wick, fib, or SNR from prefetch.
+  WIDE SL is OK (30–120p+) when that is where structure breaks. Never tighten SL just to improve RR.
+- TP: tp_levels at SNR/fib targets — min RR ${mode.minRrRatio ?? 1.2} to TP final (reward ≥ ${mode.minRrRatio ?? 1.2}× SL distance).
+  If nearest resistance is too close → skip TP1 there and target the NEXT level, or WATCH.
+- reason MUST cite prices + labels for entry, SL, and each TP.
+- If RR too low: extend TP to farther SNR/fib — NEVER move SL closer to entry.
+
+Example long (RR ≥ ${mode.minRrRatio ?? 1.2}):
+  entry 4355 | SL 4344 below PDL sweep (~114p) | TP [{ price: 4372, close_pct: 50 }, { price: 4385, close_pct: 50 }]
 
 propose_setup fields:
 - setup_type: dip_reclaim_long | dip_reclaim_short | fib_retrace | snr_bounce_long | snr_bounce_short | turtle_soup_* | sh_bms_rto | sms_bms_rto | amd_distribution

@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import { roundToPips, toPips, normalizeTpLevels } from "./price.js";
+import { roundToPips, toPips, normalizeTpLevels, computeRrRatio } from "./price.js";
 import { getLastSMCContext } from "../smc.js";
 
 const STRUCTURE_SL_SETUPS = new Set([
@@ -170,6 +170,116 @@ export function validateProposedSl(args, _ctx, mode) {
   }
 
   return { ok: true, sl_pips: slPips };
+}
+
+export function validateSetupReason(args) {
+  if (config.screening?.llmOwnsTpSl === false) return { ok: true };
+
+  const reason = String(args.reason || "").trim();
+  const sl = Number(args.sl);
+  const entry = Number(args.entry);
+
+  if (reason.length < 50) {
+    return {
+      ok: false,
+      reason: "reason_too_short",
+      message: "reason must explain entry, SL, and TP with structure labels + prices (support/resistance/fib/sweep).",
+    };
+  }
+
+  const slText = Number.isFinite(sl) ? sl.toFixed(2) : "";
+  if (slText && !reason.includes(slText) && !reason.includes(String(sl))) {
+    return {
+      ok: false,
+      reason: "reason_missing_sl",
+      message: `reason must state why SL is at ${sl} (which support/resistance/fib/sweep level).`,
+    };
+  }
+
+  if (Array.isArray(args.tp_levels) && args.tp_levels.length) {
+    const missingTp = args.tp_levels.filter((t) => {
+      const p = Number(t.price);
+      if (!Number.isFinite(p)) return true;
+      const pt = p.toFixed(2);
+      return !reason.includes(pt) && !reason.includes(String(p));
+    });
+    if (missingTp.length === args.tp_levels.length) {
+      return {
+        ok: false,
+        reason: "reason_missing_tp",
+        message: "reason must cite the SNR/fib target for each tp_levels price.",
+      };
+    }
+  }
+
+  if (!args.sl_anchor && !/\b(support|resistance|fib|sweep|snr|pdh|pdl|asian|ote|supply|demand)\b/i.test(reason)) {
+    return {
+      ok: false,
+      reason: "reason_no_structure",
+      message: "reason must reference structure (support, resistance, fib, sweep, etc.) for SL/TP placement.",
+    };
+  }
+
+  if (Number.isFinite(entry) && Number.isFinite(sl) && Math.abs(entry - sl) < (config.broker.pipSize || 0.1) * 5) {
+    return {
+      ok: false,
+      reason: "sl_on_entry",
+      message: "SL too close to entry — place beyond the next structure level, not on the entry zone.",
+    };
+  }
+
+  return { ok: true };
+}
+
+/** Min RR without tightening SL — extend TP to next SNR/fib instead. */
+export function validateMinRr(args, mode) {
+  if (config.screening?.enforceMinRr === false) return { ok: true };
+
+  const minRr = mode.minRrRatio ?? 1.2;
+  if (minRr <= 0) return { ok: true };
+
+  const entry = Number(args.entry);
+  const sl = Number(args.sl);
+  const side = args.side;
+  if (!Number.isFinite(entry) || !Number.isFinite(sl)) return { ok: true };
+
+  const riskPips = toPips(Math.abs(entry - sl));
+  const minRewardPips = Math.ceil(riskPips * minRr);
+
+  if (!Array.isArray(args.tp_levels) || !args.tp_levels.length) {
+    return {
+      ok: false,
+      reason: "tp_required_for_rr",
+      min_rr: minRr,
+      sl_pips: riskPips,
+      message: `tp_levels required. SL at structure (${riskPips}p risk) — target next SNR/fib ≥${minRewardPips}p for RR ${minRr}. Do NOT tighten SL.`,
+    };
+  }
+
+  const tpLevels = normalizeTpLevels(side, entry, sl, args.tp_levels);
+  if (!tpLevels.length) {
+    return {
+      ok: false,
+      reason: "invalid_tp_levels",
+      message: "tp_levels must be on profit side of entry (long: above, short: below).",
+    };
+  }
+
+  const tpFinal = tpLevels[tpLevels.length - 1].price;
+  const rr = computeRrRatio(side, entry, sl, tpFinal);
+  if (rr < minRr) {
+    return {
+      ok: false,
+      reason: "rr_too_low",
+      rr_ratio: rr,
+      min_rr: minRr,
+      sl_pips: riskPips,
+      min_tp_pips: minRewardPips,
+      message: `RR ${rr} < ${minRr}. Keep SL at ${sl} (${riskPips}p) — extend TP final to next SNR/fib ≥${minRewardPips}p from entry. Never tighten SL to fix RR.`,
+    };
+  }
+
+  return { ok: true, rr_ratio: rr };
 }
 
 export function validateProposedTp(args) {

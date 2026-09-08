@@ -12,7 +12,7 @@ import {
   extractSignalsFromCombined,
 } from "../signal-tracker.js";
 import { buildSMCContext, validateSMCSetup, getLastSMCContext, formatSMCForPrompt } from "../smc.js";
-import { resolveProposePrice, validateProposedEntry, validateProposedSl, validateProposedTp } from "./setup-gates.js";
+import { resolveProposePrice, validateProposedEntry, validateProposedSl, validateProposedTp, validateSetupReason, validateMinRr } from "./setup-gates.js";
 import * as market from "./market.js";
 import * as backtest from "./backtest.js";
 
@@ -170,6 +170,30 @@ const toolMap = {
       }, args);
     }
 
+    const reasonCheck = validateSetupReason({ ...args, entry: entryCheck.entry ?? args.entry });
+    if (!reasonCheck.ok) {
+      return recordProposeBlocked({
+        success: false,
+        blocked: true,
+        reason: reasonCheck.reason,
+        message: reasonCheck.message,
+      }, args);
+    }
+
+    const rrCheck = validateMinRr({ ...args, entry: entryCheck.entry ?? args.entry }, mode);
+    if (!rrCheck.ok) {
+      return recordProposeBlocked({
+        success: false,
+        blocked: true,
+        reason: rrCheck.reason,
+        message: rrCheck.message,
+        rr_ratio: rrCheck.rr_ratio,
+        min_rr: rrCheck.min_rr,
+        sl_pips: rrCheck.sl_pips,
+        min_tp_pips: rrCheck.min_tp_pips,
+      }, args);
+    }
+
     const result = createSetup({
       ...args,
       entry: entryCheck.entry ?? args.entry,
@@ -204,7 +228,7 @@ const toolMap = {
             : result.reason === "sl_too_tight"
               ? `SL ${result.sl_pips} pips below min ${result.min_sl_pips} — place SL below next structure level, not on top of entry zone`
               : result.reason === "rr_too_low"
-                ? `RR ${result.rr_ratio} below min ${result.min_rr}`
+                ? (result.message || `RR ${result.rr_ratio} below min ${result.min_rr} — extend TP to next SNR/fib, do not tighten SL`)
                 : undefined,
         ...extra,
       }, args);

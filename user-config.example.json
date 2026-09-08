@@ -73,6 +73,7 @@
     "maxSetupsPerDay": 0,
     "skipWeekends": true,
     "llmOwnsTpSl": true,
+    "enforceMinRr": true,
     "newsBlackoutMinutes": 0,
     "nearTpSlAlertPct": 80,
     "requireEntryNearPrice": true,
