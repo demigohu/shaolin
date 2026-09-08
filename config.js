@@ -88,7 +88,7 @@ export const config = {
   },
   modes: { ...defaultModes, ...(u.modes || {}) },
   screening: {
-    maxSetupsPerDay: u.maxSetupsPerDay ?? 8,
+    maxSetupsPerDay: u.screening?.maxSetupsPerDay ?? u.maxSetupsPerDay ?? 8,
     newsBlackoutMinutes: u.newsBlackoutMinutes ?? 0,
     nearTpSlAlertPct: u.nearTpSlAlertPct ?? 80,
     blockExtremeRsi: u.screening?.blockExtremeRsi !== false,

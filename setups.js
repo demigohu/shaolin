@@ -154,7 +154,8 @@ export function createSetup(input) {
     return { skipped: true, reason: "thesis_cooldown", thesis_id: input.thesis_id || null };
   }
 
-  if (countSetupsToday() >= (config.screening.maxSetupsPerDay ?? 8)) {
+  const maxPerDay = config.screening.maxSetupsPerDay;
+  if (maxPerDay != null && maxPerDay > 0 && countSetupsToday() >= maxPerDay) {
     return { skipped: true, reason: "max_setups_per_day" };
   }
 
