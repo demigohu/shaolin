@@ -82,8 +82,10 @@ export const config = {
   },
   broker: {
     name: u.brokerName ?? u.broker?.name ?? "HFM",
+    accountType: u.broker?.accountType ?? "standard",
     pipSize: u.pipSize ?? u.broker?.pipSize ?? 0.1,
     digits: u.digits ?? u.broker?.digits ?? 2,
+    spreadPips: u.broker?.spreadPips ?? null,
     priceOffset: u.priceOffset ?? u.broker?.priceOffset ?? 0,
   },
   modes: { ...defaultModes, ...(u.modes || {}) },

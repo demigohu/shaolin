@@ -19,7 +19,7 @@ export function buildSystemPrompt(agentType, context = {}) {
   const shared = `
 ── SHAOLIN XAUUSD AGENT ──
 Symbol (data): ${market.dataExchange}:${market.dataSymbol}
-Broker display: ${broker.name} | pipSize ${broker.pipSize} | offset ${broker.priceOffset}
+Broker display: ${broker.name} | pipSize ${broker.pipSize} | offset ${broker.priceOffset}${broker.spreadPips === 0 || broker.accountType === "zero_spread" ? " | zero spread (OANDA quote ≈ MT5 fill; no spread buffer on RR)" : broker.spreadPips != null ? ` | spread ~${broker.spreadPips}p` : ""}
 Active mode: ${mode.id} (${mode.label}) | session: ${session}
 Timeframes: ${mode.timeframes.join(" → ")}
 Min confidence: ${mode.minConfidence}% (self-assessed — not config-gated when llmOwnsTpSl)
