@@ -54,6 +54,7 @@ export function normalizeTpLevels(side, entry, sl, rawLevels) {
       return {
         level: i + 1,
         price,
+        label: String(t.label || "").trim().slice(0, 120) || null,
         rr: Number.isFinite(Number(t.rr))
           ? Number(t.rr)
           : computeRrRatio(side, entry, sl, price),

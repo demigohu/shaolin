@@ -88,17 +88,21 @@ TP / SL — structure-first (YOU define; width follows structure, not a pip temp
   WIDE SL is OK (30–120p+) when that is where structure breaks. Never tighten SL just to improve RR.
 - TP: tp_levels at SNR/fib targets — min RR ${mode.minRrRatio ?? 1.2} to TP final (reward ≥ ${mode.minRrRatio ?? 1.2}× SL distance).
   If nearest resistance is too close → skip TP1 there and target the NEXT level, or WATCH.
-- reason MUST cite prices + labels for entry, SL, and each TP.
+- sl_anchor REQUIRED — one line why SL is there (structure name + level price).
+- Each tp_levels[].label REQUIRED — SNR/fib target name for that TP price.
+- reason = DIP→ENTRY thesis only (chain steps). Do NOT bury SL/TP labels inside reason.
 - If RR too low: extend TP to farther SNR/fib — NEVER move SL closer to entry.
 
-Example long (RR ≥ ${mode.minRrRatio ?? 1.2}):
-  entry 4355 | SL 4344 below PDL sweep (~114p) | TP [{ price: 4372, close_pct: 50 }, { price: 4385, close_pct: 50 }]
+Example short (RR ≥ ${mode.minRrRatio ?? 1.2}):
+  entry 4395.71 | sl 4399.5 | sl_anchor: "above 1H high 4396.89 + sweep buffer"
+  tp_levels: [{ price: 4389.9, close_pct: 100, label: "MTF support / 4H demand" }]
+  reason: "DIP at 0.786 fib, MTF bearish -3, absorption at resistance stack..."
 
 propose_setup fields:
 - setup_type: dip_reclaim_long | dip_reclaim_short | fib_retrace | snr_bounce_long | snr_bounce_short | turtle_soup_* | sh_bms_rto | sms_bms_rto | amd_distribution
 - confluence_factors (≥2): htf_bias | snr_zone | fib_retrace | absorption | reclaim | mtf_sr_zone | liquidity_sweep | fib_ote | ltf_structure | order_block_rto | session_amd | london_open | ny_open | asian_range | news_catalyst
 - entry_style: market (reclaim now) | limit (fib/SNR retrace)
-- entry, sl, tp_levels, confidence, reason (must cite SNR/fib levels used)
+- entry, sl, sl_anchor, tp_levels (price + label + close_pct), confidence, reason (thesis only)
 
 When to WATCH (not SETUP):
 - Chain broken at any step (no dip, structure broken, no absorption, no reclaim).

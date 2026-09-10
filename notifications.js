@@ -100,7 +100,8 @@ export function formatSetupStatus(setup, price) {
   const tpLines = (setup.tp_levels || []).map((tp) => {
     const dist = toPips(Math.abs(tp.price - price));
     const icon = tp.status === "hit" ? "✅" : "⏳";
-    return `  ${icon} TP${tp.level} ${tp.price} (${dist}p away)`;
+    const target = tp.label ? ` — ${tp.label}` : "";
+    return `  ${icon} TP${tp.level} ${tp.price}${target} (${dist}p away)`;
   });
 
   const lines = [
@@ -110,7 +111,8 @@ export function formatSetupStatus(setup, price) {
     lines.push(`  ⏳ LIMIT waiting — entry ${entry} (${distEntryPips}p away)`);
   } else {
     lines.push(`  Entry ${entry} (${distEntryPips}p ${price >= entry ? "above" : "below"})`);
-    lines.push(`  SL ${sl} (${distSlPips}p away) | RR now ${rr?.toFixed(2) ?? "?"}`);
+    const slNote = setup.sl_anchor ? ` — ${setup.sl_anchor}` : "";
+    lines.push(`  SL ${sl}${slNote} (${distSlPips}p away) | RR now ${rr?.toFixed(2) ?? "?"}`);
   }
   lines.push(...tpLines);
   return lines.join("\n");
@@ -118,8 +120,14 @@ export function formatSetupStatus(setup, price) {
 
 export function formatSetupAlert(setup) {
   const tps = (setup.tp_levels || [])
-    .map((t) => `  TP${t.level}: ${formatPriceDual(t.price)} — close ${t.close_pct}%`)
+    .map((t) => {
+      const target = t.label ? ` — ${t.label}` : "";
+      return `  TP${t.level}: ${formatPriceDual(t.price)}${target} — close ${t.close_pct}%`;
+    })
     .join("\n");
+  const slLine = setup.sl_anchor
+    ? `SL     ${formatPriceDual(setup.sl)} (${setup.sl_pips}p) — ${setup.sl_anchor}`
+    : `SL     ${formatPriceDual(setup.sl)} (${setup.sl_pips} pips)`;
   const styleLine = setup.entry_style === "limit"
     ? `Entry style: LIMIT — waiting for price @ ${formatPriceDual(setup.entry)} (${setup.entry_distance_pips ?? "?"}p from propose)`
     : setup.entry_style === "market"
@@ -134,7 +142,7 @@ export function formatSetupAlert(setup) {
     setup.confluence_factors?.length ? `Confluence: ${setup.confluence_factors.join(", ")}` : null,
     "",
     `Entry  ${formatPriceDual(setup.entry)}`,
-    `SL     ${formatPriceDual(setup.sl)} (${setup.sl_pips} pips)`,
+    slLine,
     tps || `TP     ${formatPriceDual(setup.tp)}`,
     "",
     `RR ${setup.rr_ratio} | Conf ${setup.confidence}%`,

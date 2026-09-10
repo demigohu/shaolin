@@ -78,7 +78,7 @@ export const tools = [
           sl: { type: "number", description: "Stop beyond structure invalidation (may be wide if next SNR/fib is far)" },
           sl_anchor: {
             type: "string",
-            description: "Structure label for SL, e.g. 'below H1 support 2595' or 'above BSL sweep 4378'",
+            description: "REQUIRED. Why SL is here — e.g. 'above 1H high 4396.89 + sweep buffer' or 'below PDL 4345 sweep wick'",
           },
           tp_levels: {
             type: "array",
@@ -87,10 +87,14 @@ export const tools = [
               type: "object",
               properties: {
                 price: { type: "number" },
+                label: {
+                  type: "string",
+                  description: "REQUIRED. Structure target — e.g. 'MTF support / 4H demand 4389.9'",
+                },
                 close_pct: { type: "number", description: "Percent of position to close at this TP" },
                 rr: { type: "number", description: "Optional RR label for logging" },
               },
-              required: ["price"],
+              required: ["price", "label"],
             },
           },
           confidence: { type: "number", description: "0-100" },
@@ -115,7 +119,7 @@ export const tools = [
             },
           },
           bias: { type: "string" },
-          reason: { type: "string", description: "Required: cite entry/SL/TP structure levels with prices (support, resistance, fib, sweep)" },
+          reason: { type: "string", description: "Required: DIP→ENTRY thesis (chain analysis). SL/TP structure goes in sl_anchor + tp_levels[].label — not here." },
           thesis_id: { type: "string", description: "Short thesis identifier for dedup" },
           entry_style: {
             type: "string",

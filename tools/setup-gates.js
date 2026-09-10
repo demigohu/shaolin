@@ -176,6 +176,7 @@ export function validateSetupReason(args) {
   if (config.screening?.llmOwnsTpSl === false) return { ok: true };
 
   const reason = String(args.reason || "").trim();
+  const slAnchor = String(args.sl_anchor || "").trim();
   const sl = Number(args.sl);
   const entry = Number(args.entry);
 
@@ -183,41 +184,45 @@ export function validateSetupReason(args) {
     return {
       ok: false,
       reason: "reason_too_short",
-      message: "reason must explain entry, SL, and TP with structure labels + prices (support/resistance/fib/sweep).",
+      message: "reason must explain DIP→ENTRY thesis (≥50 chars). SL/TP structure goes in sl_anchor + tp_levels[].label.",
     };
   }
 
-  const slText = Number.isFinite(sl) ? sl.toFixed(2) : "";
-  if (slText && !reason.includes(slText) && !reason.includes(String(sl))) {
+  if (slAnchor.length < 12) {
     return {
       ok: false,
-      reason: "reason_missing_sl",
-      message: `reason must state why SL is at ${sl} (which support/resistance/fib/sweep level).`,
+      reason: "sl_anchor_required",
+      message: 'sl_anchor required — e.g. "above 1H high 4396.89 + buffer" or "below PDL sweep 4345".',
+    };
+  }
+
+  if (!/\b(support|resistance|fib|sweep|snr|pdh|pdl|asian|ote|supply|demand|high|low|bsl|ssl|ob|order block|swing)\b/i.test(slAnchor)) {
+    return {
+      ok: false,
+      reason: "sl_anchor_no_structure",
+      message: "sl_anchor must name the structure level SL sits beyond (not just pip count).",
     };
   }
 
   if (Array.isArray(args.tp_levels) && args.tp_levels.length) {
-    const missingTp = args.tp_levels.filter((t) => {
-      const p = Number(t.price);
-      if (!Number.isFinite(p)) return true;
-      const pt = p.toFixed(2);
-      return !reason.includes(pt) && !reason.includes(String(p));
-    });
-    if (missingTp.length === args.tp_levels.length) {
+    const missingLabel = args.tp_levels.filter((t) => String(t.label || "").trim().length < 8);
+    if (missingLabel.length) {
       return {
         ok: false,
-        reason: "reason_missing_tp",
-        message: "reason must cite the SNR/fib target for each tp_levels price.",
+        reason: "tp_label_required",
+        message: 'Each tp_levels needs label — e.g. "MTF support 4389.9 / 4H demand".',
       };
     }
-  }
-
-  if (!args.sl_anchor && !/\b(support|resistance|fib|sweep|snr|pdh|pdl|asian|ote|supply|demand)\b/i.test(reason)) {
-    return {
-      ok: false,
-      reason: "reason_no_structure",
-      message: "reason must reference structure (support, resistance, fib, sweep, etc.) for SL/TP placement.",
-    };
+    const weakLabel = args.tp_levels.filter(
+      (t) => !/\b(support|resistance|fib|snr|pdh|pdl|asian|supply|demand|target|ote|swing|low|high)\b/i.test(String(t.label)),
+    );
+    if (weakLabel.length) {
+      return {
+        ok: false,
+        reason: "tp_label_no_structure",
+        message: "Each tp_levels.label must name the SNR/fib target (support, resistance, fib, etc.).",
+      };
+    }
   }
 
   if (Number.isFinite(entry) && Number.isFinite(sl) && Math.abs(entry - sl) < (config.broker.pipSize || 0.1) * 5) {
