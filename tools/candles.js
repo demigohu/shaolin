@@ -7,6 +7,7 @@
  * shifted by `basis = futures_last - spot_last` measured at fetch time.
  */
 
+import { fetch as undiciFetch, ProxyAgent } from "undici";
 import { config } from "../config.js";
 import { log } from "../logger.js";
 
@@ -14,23 +15,54 @@ const TTL_MS = { "5m": 60_000, "15m": 120_000, "1h": 300_000, "1d": 900_000 };
 const RANGE = { "5m": "2d", "15m": "5d", "1h": "1mo", "1d": "1y" };
 const STALE_OK_MS = 30 * 60_000;
 const H4_MS = 4 * 60 * 60_000;
+const HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 
 const cache = new Map();
 let lastBasis = null;
+
+/**
+ * Same Webshare env vars the MCP uses (PROXY_ENABLED / PROXY_HOST / PROXY_PORT /
+ * PROXY_USERNAME_PREFIX / PROXY_PASSWORD) — cloud IPs are often 429'd by Yahoo.
+ */
+function proxyDispatcher() {
+  const prefix = process.env.PROXY_USERNAME_PREFIX;
+  const password = process.env.PROXY_PASSWORD;
+  if ((process.env.PROXY_ENABLED ?? "true").toLowerCase() !== "true" || !prefix || !password) return null;
+  const min = Number(process.env.PROXY_SESSION_MIN ?? 1);
+  const max = Number(process.env.PROXY_SESSION_MAX ?? 250);
+  const session = min + Math.floor(Math.random() * (max - min + 1));
+  const host = process.env.PROXY_HOST || "p.webshare.io";
+  const port = process.env.PROXY_PORT || "80";
+  return new ProxyAgent(`http://${encodeURIComponent(`${prefix}-${session}`)}:${encodeURIComponent(password)}@${host}:${port}`);
+}
+
+async function fetchChart(interval) {
+  const symbol = encodeURIComponent(config.market.yahooSymbol);
+  const dispatcher = proxyDispatcher();
+  const errors = [];
+  for (const host of HOSTS) {
+    const url = `https://${host}/v8/finance/chart/${symbol}?interval=${interval}&range=${RANGE[interval]}`;
+    try {
+      const res = await undiciFetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        signal: AbortSignal.timeout(15_000),
+        ...(dispatcher ? { dispatcher } : {}),
+      });
+      if (res.ok) return res.json();
+      errors.push(`${host} HTTP ${res.status}`);
+    } catch (error) {
+      errors.push(`${host} ${error.message}`);
+    }
+  }
+  throw new Error(`${errors.join(", ")}${dispatcher ? " (via proxy)" : " (no proxy — set PROXY_* in .env)"}`);
+}
 
 export async function fetchCandles(interval) {
   const hit = cache.get(interval);
   if (hit && Date.now() - hit.at < TTL_MS[interval]) return hit;
 
-  const symbol = encodeURIComponent(config.market.yahooSymbol);
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${interval}&range=${RANGE[interval]}`;
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
+    const json = await fetchChart(interval);
     const r = json?.chart?.result?.[0];
     if (!r?.timestamp?.length) throw new Error("empty chart");
     const q = r.indicators?.quote?.[0] || {};

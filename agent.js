@@ -32,12 +32,11 @@ function getClient() {
 const ONCE_PER_SESSION = new Set(["propose_setup"]);
 
 export async function agentLoop(goal, maxSteps = config.llm.maxSteps, agentType = "GENERAL", model = null, options = {}) {
-  const { context = {}, onToolStart, onToolFinish } = options;
-  const systemPrompt = buildSystemPrompt(agentType, context);
-  let messages = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: goal },
-  ];
+  const { context = {}, history = null, onToolStart, onToolFinish } = options;
+  // `history` continues an earlier conversation (system prompt + tool results included).
+  const messages = history
+    ? [...history, { role: "user", content: goal }]
+    : [{ role: "system", content: buildSystemPrompt(agentType, context) }, { role: "user", content: goal }];
 
   const firedOnce = new Set();
   const usedModel = model || (agentType === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel);
