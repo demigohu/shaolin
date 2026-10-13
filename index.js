@@ -188,6 +188,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     }
 
     const action = classifyAction(content);
+    log("screen", `Result: ${action} — ${content.replace(/\s+/g, " ").slice(0, 200)}`);
     appendScreeningDecision({ action, summary: content?.slice(0, 200), reason: content?.slice(0, 500) });
     const sendDigest = notify && config.notifications?.notifyScreeningDigest
       && _screenCycleCount % (config.notifications?.digestEveryScreeningCycles ?? 1) === 0
