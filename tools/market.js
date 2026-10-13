@@ -2,6 +2,7 @@ import { config } from "../config.js";
 import { callMcpTool } from "./mcp-client.js";
 import { getActiveMode } from "../modes.js";
 import { log } from "../logger.js";
+import { getGoldHeadlines } from "./news.js";
 
 const ANALYSIS_TTL_MS = 30_000;
 const analysisCache = new Map();
@@ -118,13 +119,16 @@ export async function getXauusdMtf() {
   });
 }
 
+/**
+ * TradingView TA on one timeframe + recent gold headlines. Replaces the MCP's
+ * combined_analysis, whose Marketaux lookup returns years-old articles and a
+ * keyword "sentiment" score derived from them.
+ */
 export async function getXauusdCombined(timeframe) {
   const tf = timeframe || getActiveMode().combinedTimeframe || "5m";
-  return callMcpTool("combined_analysis", {
-    symbol: config.market.dataSymbol,
-    exchange: config.market.dataExchange,
-    timeframe: tf,
-  });
+  const technical = await fetchAnalysis(tf);
+  const news = await getGoldHeadlines();
+  return { symbol: config.market.feedLabel, timeframe: tf, technical, news };
 }
 
 /**
@@ -150,8 +154,9 @@ export async function getManagementPrice() {
   return { price: null, source: null, errors };
 }
 
-export async function getGoldNews(limit = 5) {
-  return callMcpTool("financial_news", { symbol: "XAUUSD", category: "all", limit });
+export async function getGoldNews(limit = 3) {
+  const news = await getGoldHeadlines();
+  return { ...news, items: news.items.slice(0, limit) };
 }
 
 export async function getMarketSnapshot() {

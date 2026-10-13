@@ -76,25 +76,13 @@ function summarizeMtfZones(result) {
 function summarizeCombined(result, args) {
   const tf = result.timeframe || args.timeframe || "?";
   const tech = result.technical || {};
-  const ms = tech.market_sentiment || {};
-  const ind = tech.indicators || tech;
-  const rsiRaw = ind.rsi ?? tech.rsi;
-  const rsiNum = extractRsi(rsiRaw);
-  const rsi = rsiNum != null ? rsiNum.toFixed(1) : rsiRaw?.signal ?? "?";
-  const momentum = ms.momentum || ms.buy_sell_signal || "?";
-  const sent = result.sentiment?.sentiment_label
-    ?? (result.sentiment?.sentiment_score != null ? result.sentiment.sentiment_score : "?");
-  const news = result.news?.count ?? 0;
-  const note = result.sentiment?.note || result.news?.note || "";
-  const conf = result.confluence?.confidence || "?";
-  const agree = result.confluence?.signals_agree;
-  const lines = [
-    `combined@${tf}: ${momentum} RSI=${rsi ?? "?"} sentiment=${sent} news=${news} confluence=${conf}${agree != null ? ` agree=${agree}` : ""}`,
-  ];
-  if (note) lines.push(`  note: ${String(note).slice(0, 120)}`);
-  const headlines = result.news?.latest || result.news?.items || [];
-  for (const h of headlines.slice(0, 2)) {
-    if (h?.title) lines.push(`  • ${String(h.title).slice(0, 90)}`);
+  if (tech.error) return `combined@${tf}: TA ERROR ${tech.error}`;
+  const momentum = tech.market_sentiment?.buy_sell_signal || tech.market_sentiment?.momentum || "?";
+  const rsiNum = extractRsi(tech.rsi);
+  const news = result.news || {};
+  const lines = [`combined@${tf}: ${momentum} RSI=${rsiNum != null ? rsiNum.toFixed(1) : "?"} news=${news.count ?? 0}${news.note ? ` (${news.note})` : ""}${news.error ? ` (news error: ${news.error})` : ""}`];
+  for (const h of (news.items || []).slice(0, 3)) {
+    lines.push(`  • [${h.age_min != null ? `${h.age_min}m ago` : "?"}] ${String(h.title).slice(0, 90)}`);
   }
   return lines.join("\n");
 }

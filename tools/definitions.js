@@ -11,7 +11,7 @@ export const tools = [
     type: "function",
     function: {
       name: "get_xauusd_combined",
-      description: "Combined TA + news sentiment for XAUUSD on the active mode timeframe.",
+      description: "TradingView TA for XAUUSD on one timeframe + gold headlines from the last 24h (newest first, with age in minutes).",
       parameters: {
         type: "object",
         properties: {
@@ -33,7 +33,7 @@ export const tools = [
     type: "function",
     function: {
       name: "get_gold_news",
-      description: "Recent financial news relevant to gold.",
+      description: "Gold headlines from the last 24h (Marketaux), newest first.",
       parameters: {
         type: "object",
         properties: { limit: { type: "number" } },
@@ -129,7 +129,7 @@ export const tools = [
           risks: { type: "array", items: { type: "string" } },
           screening_snapshot: {
             type: "object",
-            description: "Optional screening signals (mtf_net_score, rsi, news_sentiment_score, etc.)",
+            description: "Optional screening signals (mtf_net_score, rsi, etc.)",
           },
         },
         required: ["side", "entry", "sl", "confidence", "reason", "setup_type", "confluence_factors"],

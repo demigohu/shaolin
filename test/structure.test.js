@@ -127,3 +127,16 @@ test("measureBasis pairs futures and spot at the same bar open, newest anchor fi
   assert.equal(measureBasis(m5, [{ t: 3000, spot: 4190 }, { t: 1000, spot: 4185.2 }]).toFixed(1), "23.7");
   assert.equal(measureBasis(m5, [{ t: 3000, spot: 4190 }]), null, "Yahoo candle not published yet");
 });
+
+test("toHeadlines drops stale/undated articles and sorts newest first", async () => {
+  const { toHeadlines, marketauxDate } = await import("../tools/news.js");
+  const now = Date.parse("2026-10-13T13:00:00Z");
+  const items = toHeadlines([
+    { title: "Old XAU outlook", published_at: "2022-06-23T03:30:00Z" },
+    { title: "Gold slips as dollar firms", published_at: "2026-10-13T12:30:00Z", source: "x" },
+    { title: "Gold hits session high", published_at: "2026-10-13T12:50:00Z" },
+    { title: "No date" },
+  ], now, 24);
+  assert.deepEqual(items.map((h) => [h.title, h.age_min]), [["Gold hits session high", 10], ["Gold slips as dollar firms", 30]]);
+  assert.equal(marketauxDate(now), "2026-10-13T13:00");
+});

@@ -45,8 +45,7 @@ export function extractSignalsFromCombined(combined) {
   const tech = combined.technical || {};
   const momentum = tech.market_sentiment?.momentum;
   return {
-    combined_signals_agree: combined.confluence?.signals_agree ? 1 : 0,
-    news_sentiment_score: combined.sentiment?.sentiment_score ?? null,
+    news_count: combined.news?.count ?? null,
     rsi: extractRsi(tech.rsi),
     trend_strength: momentum === "Bullish" ? 1 : momentum === "Bearish" ? -1 : 0,
   };

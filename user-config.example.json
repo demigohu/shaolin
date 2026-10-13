@@ -122,6 +122,12 @@
     "screeningModel": null,
     "generalModel": null
   },
+  "news": {
+    "query": "gold | bullion | xau",
+    "lookbackHours": 24,
+    "cacheMin": 30,
+    "dailyBudget": 60
+  },
   "performanceGate": {
     "enabled": true,
     "windowDays": 60,

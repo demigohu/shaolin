@@ -169,6 +169,12 @@ export const config = {
     screeningModel: resolveLlmModel(u.screeningModel ?? u.llm?.screeningModel),
     generalModel: resolveLlmModel(u.generalModel ?? u.llm?.generalModel),
   },
+  news: {
+    query: u.news?.query ?? "gold | bullion | xau",
+    lookbackHours: u.news?.lookbackHours ?? 24,
+    cacheMin: u.news?.cacheMin ?? 30,
+    dailyBudget: u.news?.dailyBudget ?? 60,
+  },
   performanceGate: {
     enabled: u.performanceGate?.enabled !== false,
     windowDays: u.performanceGate?.windowDays ?? 60,
