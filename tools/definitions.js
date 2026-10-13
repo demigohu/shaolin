@@ -11,7 +11,7 @@ export const tools = [
     type: "function",
     function: {
       name: "get_xauusd_combined",
-      description: "TradingView TA for XAUUSD on one timeframe + gold headlines from the last 24h (newest first, with age in minutes).",
+      description: "TradingView TA for XAUUSD on one timeframe (plus last-24h gold headlines when news is enabled).",
       parameters: {
         type: "object",
         properties: {

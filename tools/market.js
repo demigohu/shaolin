@@ -127,8 +127,8 @@ export async function getXauusdMtf() {
 export async function getXauusdCombined(timeframe) {
   const tf = timeframe || getActiveMode().combinedTimeframe || "5m";
   const technical = await fetchAnalysis(tf);
-  const news = await getGoldHeadlines();
-  return { symbol: config.market.feedLabel, timeframe: tf, technical, news };
+  if (!config.news?.enabled) return { symbol: config.market.feedLabel, timeframe: tf, technical };
+  return { symbol: config.market.feedLabel, timeframe: tf, technical, news: await getGoldHeadlines() };
 }
 
 /**
@@ -155,6 +155,7 @@ export async function getManagementPrice() {
 }
 
 export async function getGoldNews(limit = 3) {
+  if (!config.news?.enabled) return { count: 0, items: [], note: "news disabled (news.enabled=false)" };
   const news = await getGoldHeadlines();
   return { ...news, items: news.items.slice(0, limit) };
 }

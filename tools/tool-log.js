@@ -79,8 +79,10 @@ function summarizeCombined(result, args) {
   if (tech.error) return `combined@${tf}: TA ERROR ${tech.error}`;
   const momentum = tech.market_sentiment?.buy_sell_signal || tech.market_sentiment?.momentum || "?";
   const rsiNum = extractRsi(tech.rsi);
-  const news = result.news || {};
-  const lines = [`combined@${tf}: ${momentum} RSI=${rsiNum != null ? rsiNum.toFixed(1) : "?"} news=${news.count ?? 0}${news.note ? ` (${news.note})` : ""}${news.error ? ` (news error: ${news.error})` : ""}`];
+  const head = `combined@${tf}: ${momentum} RSI=${rsiNum != null ? rsiNum.toFixed(1) : "?"}`;
+  const news = result.news;
+  if (!news) return head;
+  const lines = [`${head} news=${news.count ?? 0}${news.note ? ` (${news.note})` : ""}${news.error ? ` (news error: ${news.error})` : ""}`];
   for (const h of (news.items || []).slice(0, 3)) {
     lines.push(`  • [${h.age_min != null ? `${h.age_min}m ago` : "?"}] ${String(h.title).slice(0, 90)}`);
   }

@@ -12,7 +12,8 @@ const SCREENER_TOOLS = new Set([
 ]);
 
 function getToolsForRole(agentType) {
-  return agentType === "SCREENER" ? tools.filter((t) => SCREENER_TOOLS.has(t.function.name)) : tools;
+  const enabled = tools.filter((t) => t.function.name !== "get_gold_news" || config.news?.enabled);
+  return agentType === "SCREENER" ? enabled.filter((t) => SCREENER_TOOLS.has(t.function.name)) : enabled;
 }
 
 let client = null;

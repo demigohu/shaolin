@@ -178,6 +178,7 @@ export const config = {
     warnOpenSetupMin: u.calendar?.warnOpenSetupMin ?? 30,
   },
   news: {
+    enabled: u.news?.enabled === true,
     query: u.news?.query ?? '"gold price" | "spot gold" | "gold futures" | bullion | xauusd',
     lookbackHours: u.news?.lookbackHours ?? 24,
     cacheMin: u.news?.cacheMin ?? 30,
