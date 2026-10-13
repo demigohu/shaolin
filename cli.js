@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 import "dotenv/config";
 import { runScreeningCycle, runManagementCycle } from "./index.js";
-import { cancelSetup, cancelAllOpenSetups, getSetupsSummary, getOpenSetups } from "./setups.js";
+import { cancelSetup, cancelAllOpenSetups, getSetupsSummary } from "./setups.js";
 import { closeMcp } from "./tools/mcp-client.js";
-import { compareStrategies } from "./tools/backtest.js";
-import { ensureStrategyApproved, getActiveStrategy } from "./strategies.js";
 import { formatAgentStatus } from "./status.js";
 import { getSetupMemorySummary, getThesisMemory } from "./setup-memory.js";
-import { getWeightsSummary } from "./signal-weights.js";
-import { config } from "./config.js";
-import { testTelegram, getTelegramStatus } from "./telegram.js";
+import { formatPerformanceStats } from "./performance-stats.js";
+import { getActiveMode } from "./modes.js";
+import { testTelegram } from "./telegram.js";
 
 const cmd = process.argv[2];
 const arg = process.argv[3];
@@ -32,19 +30,8 @@ async function main() {
         console.log(getSetupMemorySummary(10));
       }
       break;
-    case "weights":
-      console.log(config.darwin?.enabled === false
-        ? "Darwin signal weights disabled."
-        : getWeightsSummary());
-      break;
-    case "gate": {
-      const strategy = getActiveStrategy();
-      const gate = await ensureStrategyApproved(strategy.id);
-      console.log(JSON.stringify(gate, null, 2));
-      break;
-    }
-    case "backtest":
-      console.log(JSON.stringify(await compareStrategies({ period: "1y", interval: "1h" }), null, 2));
+    case "stats":
+      console.log(formatPerformanceStats(getActiveMode().id));
       break;
     case "cancel":
       if (!arg || arg === "all") {
@@ -56,12 +43,10 @@ async function main() {
       }
       break;
     case "setups":
-      console.log(getOpenSetups().length ? getSetupsSummary() : "No open setups.");
+      console.log(getSetupsSummary());
       break;
+    case "telegram-test":
       console.log(JSON.stringify(await testTelegram(), null, 2));
-      break;
-    case "smoke":
-      console.log("Use: npm run mcp:smoke");
       break;
     default:
       console.log(`Shaolin CLI
@@ -72,12 +57,10 @@ async function main() {
   node cli.js setups      List open setups
   node cli.js cancel all  Cancel all open setups
   node cli.js cancel <id> Cancel one setup by ID
-  node cli.js memory      Thesis memory (or pass fingerprint)
-  node cli.js weights     Signal weight summary
-  node cli.js gate        Run/check backtest gate
+  node cli.js memory [fp] Thesis memory (or one fingerprint)
+  node cli.js stats       Track record by setup type / session
   node cli.js telegram-test  Test Telegram bot + send ping
-  node cli.js backtest    Compare strategies on XAUUSD
-  node cli.js smoke       MCP smoke test
+  npm run mcp:smoke       MCP smoke test
 `);
   }
   await closeMcp();

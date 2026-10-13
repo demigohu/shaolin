@@ -2,9 +2,10 @@
   "activeMode": "scalp",
   "market": {
     "dataSymbol": "XAUUSD",
-    "dataExchange": "OANDA",
+    "dataExchange": "TVC",
     "displayName": "XAUUSD",
-    "yahooSymbol": "GC=F"
+    "yahooSymbol": "GC=F",
+    "feedLabel": "TVC:GOLD"
   },
   "broker": {
     "name": "HFM Cent Zero Spread",
@@ -51,7 +52,11 @@
         { "pct": 30, "atRr": 1.5 },
         { "pct": 30, "atRr": 2.5 }
       ],
-      "sessions": ["london", "new_york"]
+      "sessions": ["london", "new_york"],
+      "maxSlPips": 80,
+      "minSlPips": 20,
+      "maxStaleDistancePips": 40,
+      "maxLimitEntryPips": 60
     },
     "swing": {
       "label": "Swing / Week",
@@ -68,7 +73,11 @@
         { "pct": 33, "atRr": 2.0 },
         { "pct": 34, "atRr": 3.0 }
       ],
-      "sessions": ["any"]
+      "sessions": ["any"],
+      "maxSlPips": 300,
+      "minSlPips": 50,
+      "maxStaleDistancePips": 150,
+      "maxLimitEntryPips": 200
     }
   },
   "screening": {
@@ -76,7 +85,6 @@
     "skipWeekends": true,
     "llmOwnsTpSl": true,
     "enforceMinRr": true,
-    "newsBlackoutMinutes": 0,
     "nearTpSlAlertPct": 80,
     "requireEntryNearPrice": true,
     "maxEntrySlippagePips": 3,
@@ -112,23 +120,16 @@
     "maxTokens": 4096,
     "maxSteps": 15,
     "screeningModel": null,
-    "managementModel": null,
     "generalModel": null
   },
-  "strategy": {
-    "requireBacktestApproval": false,
-    "activeStrategyId": "scalp_mtf_default",
-    "backtestPeriod": "1y",
-    "backtestInterval": "1h",
-    "minSharpe": 0.5
-  },
-  "darwin": {
+  "performanceGate": {
     "enabled": true,
     "windowDays": 60,
-    "minSamples": 8,
-    "recalcEveryN": 5
+    "minTrades": 5,
+    "maxWinRate": 30
   },
   "setupMemory": {
+    "zonePips": 50,
     "cooldownMinSetups": 3,
     "cooldownMaxWinRate": 25,
     "cooldownHours": 24
@@ -137,16 +138,11 @@
     "enabled": true,
     "minConfluence": 2,
     "requireTradingWindow": true,
-    "blockTrendFollowAtLiquidity": true,
-    "bootstrapAsianRange": true,
-    "asianRangeMaxPips": 50
+    "blockTrendFollowAtLiquidity": true
   },
   "mtfZones": {
     "enabled": true,
-    "mergePips": 8,
-    "proximityPips": 5,
-    "minZoneStrength": 3,
-    "timeframes": ["4h", "1h", "15m", "5m"]
+    "minZoneStrength": 3
   },
   "telegramChatId": null
 }

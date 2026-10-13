@@ -16,7 +16,9 @@ function load() {
 }
 
 function save(data) {
-  fs.writeFileSync(LOG_FILE, JSON.stringify(data, null, 2));
+  const tmp = `${LOG_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
+  fs.renameSync(tmp, LOG_FILE);
 }
 
 function sanitize(value, maxLen = 280) {
@@ -38,7 +40,6 @@ export function logProposeBlocked(result, args = {}) {
       result.sl_pips != null ? `sl=${result.sl_pips}p` : null,
       result.min_sl_pips != null ? `min_sl=${result.min_sl_pips}p` : null,
       result.distPips != null ? `entry_dist=${result.distPips}p` : null,
-      result.entry_distance_pips != null ? `entry_dist=${result.entry_distance_pips}p` : null,
     ].filter(Boolean).join(" | "),
     metrics: {
       setup_type: args.setup_type,

@@ -3,7 +3,7 @@ export const tools = [
     type: "function",
     function: {
       name: "get_xauusd_mtf",
-      description: "Multi-timeframe analysis for XAUUSD (OANDA): intraday 5m→15m→1h→4h alignment (scalp) or Weekly→Daily stack (swing).",
+      description: "Multi-timeframe trend alignment for XAUUSD (TVC:GOLD): intraday 5m→15m→1h→4h (scalp) or Weekly→15m stack (day/swing).",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -25,7 +25,7 @@ export const tools = [
     type: "function",
     function: {
       name: "get_xauusd_price",
-      description: "Current XAUUSD price quote (Yahoo GC=F proxy for management).",
+      description: "Current XAUUSD spot price on the screening feed (TVC:GOLD).",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -53,7 +53,7 @@ export const tools = [
     type: "function",
     function: {
       name: "get_mtf_zones",
-      description: "MTF S/R zone stack (4h→1h→15m→5m + PDH/PDL/Asian): merged support/resistance levels and nearest zones to price — reference map for you to pick setup area.",
+      description: "MTF S/R zone stack (fractal swings 4h/1h/15m/5m + PDH/PDL/PWH/PWL/Asian + monthly pivots): merged support/resistance and nearest zones to price.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -61,7 +61,7 @@ export const tools = [
     type: "function",
     function: {
       name: "get_smc_context",
-      description: "SMC framework: AMD session phase, Asian range, PDH/PDL, liquidity sweeps (BSL/SSL), HTF bias, suggested setup types.",
+      description: "SMC framework: AMD session phase, Asian range, PDH/PDL, liquidity raids (BSL/SSL taken/swept), BOS, order blocks, fib OTE, suggested setup types.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
@@ -74,7 +74,7 @@ export const tools = [
         type: "object",
         properties: {
           side: { type: "string", enum: ["long", "short"] },
-          entry: { type: "number" },
+          entry: { type: "number", description: "market: within a few pips of live price; limit: on the retrace side (long ≤ price, short ≥ price)" },
           sl: { type: "number", description: "Stop beyond structure invalidation (may be wide if next SNR/fib is far)" },
           sl_anchor: {
             type: "string",
@@ -97,7 +97,7 @@ export const tools = [
               required: ["price", "label"],
             },
           },
-          confidence: { type: "number", description: "0-100" },
+          confidence: { type: "number", description: "0-100; below the mode's minConfidence is rejected" },
           setup_type: {
             type: "string",
             enum: [
@@ -120,7 +120,7 @@ export const tools = [
           },
           bias: { type: "string" },
           reason: { type: "string", description: "Required: DIP→ENTRY thesis (chain analysis). SL/TP structure goes in sl_anchor + tp_levels[].label — not here." },
-          thesis_id: { type: "string", description: "Short thesis identifier for dedup" },
+          thesis_id: { type: "string", description: "Short human-readable thesis label" },
           entry_style: {
             type: "string",
             enum: ["market", "limit"],
@@ -143,80 +143,6 @@ export const tools = [
       name: "get_active_setups",
       description: "List open proposed/active setups being monitored.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "backtest_strategy",
-      description: "Backtest a strategy on XAUUSD historical data via Yahoo.",
-      parameters: {
-        type: "object",
-        properties: {
-          strategy: { type: "string", enum: ["rsi", "bollinger", "macd", "ema_cross", "supertrend", "donchian", "rsi_pullback", "keltner_breakout", "triple_ema"] },
-          period: { type: "string", enum: ["1mo", "3mo", "6mo", "1y", "2y"] },
-          interval: { type: "string", enum: ["1d", "1h"] },
-          strategy_id: { type: "string" },
-        },
-        required: ["strategy"],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "compare_strategies",
-      description: "Compare all 9 backtest strategies on XAUUSD.",
-      parameters: {
-        type: "object",
-        properties: {
-          period: { type: "string" },
-          interval: { type: "string" },
-        },
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_strategies",
-      description: "List registered strategies with backtest status and which is active.",
-      parameters: { type: "object", properties: {}, additionalProperties: false },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "backtest_mcp_strategy",
-      description: "Backtest an MCP strategy on XAUUSD. Optionally activate if approved.",
-      parameters: {
-        type: "object",
-        properties: {
-          strategy: { type: "string", enum: ["rsi", "bollinger", "macd", "ema_cross", "supertrend", "donchian", "rsi_pullback", "keltner_breakout", "triple_ema"] },
-          period: { type: "string", enum: ["1mo", "3mo", "6mo", "1y", "2y"] },
-          interval: { type: "string", enum: ["1d", "1h"] },
-          activate: { type: "boolean", description: "Set true to activate for screening if backtest passes" },
-        },
-        required: ["strategy"],
-        additionalProperties: false,
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "activate_strategy",
-      description: "Switch active screening strategy. Must be backtest-approved if gate enabled.",
-      parameters: {
-        type: "object",
-        properties: {
-          strategy_id: { type: "string", description: "e.g. scalp_supertrend" },
-          mcp_strategy: { type: "string", description: "Shorthand: supertrend, rsi, etc." },
-        },
-        additionalProperties: false,
-      },
     },
   },
   {

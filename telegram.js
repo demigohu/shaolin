@@ -1,49 +1,18 @@
-import fs from "fs";
 import { log } from "./logger.js";
-import { repoPath } from "./repo-root.js";
-
-const ENV_PATH = repoPath(".env");
-const CONFIG_PATH = repoPath("user-config.json");
-const EXAMPLE_CONFIG = repoPath("user-config.example.json");
-
-function loadEnvFile() {
-  if (!fs.existsSync(ENV_PATH)) return;
-  for (const line of fs.readFileSync(ENV_PATH, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq <= 0) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let val = trimmed.slice(eq + 1).trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-    if (!process.env[key]) process.env[key] = val;
-  }
-}
-
-function loadUserConfigTelegram() {
-  if (!fs.existsSync(CONFIG_PATH)) return;
-  try {
-    const u = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-    if (u.telegramBotToken) process.env.TELEGRAM_BOT_TOKEN ||= String(u.telegramBotToken);
-    if (u.telegramChatId) process.env.TELEGRAM_CHAT_ID ||= String(u.telegramChatId);
-  } catch (error) {
-    log("telegram_warn", `Failed to read user-config.json: ${error.message}`);
-  }
-}
-
-loadEnvFile();
-loadUserConfigTelegram();
+import "./config.js"; // loads .env + telegram keys from user-config.json into process.env
 
 function getAllowedUserIds() {
   const raw = process.env.TELEGRAM_ALLOWED_USER_IDS || "";
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+/** Allowlist from TELEGRAM_ALLOWED_USER_IDS; without one, only the configured chat may command the bot. */
 function isSenderAllowed(msg) {
   const allowed = getAllowedUserIds();
-  if (!allowed.length) return true;
+  if (!allowed.length) {
+    const ownChat = process.env.TELEGRAM_CHAT_ID?.trim();
+    return ownChat != null && String(msg?.chat?.id) === ownChat;
+  }
   const fromId = msg?.from?.id != null ? String(msg.from.id) : null;
   const chatId = msg?.chat?.id != null ? String(msg.chat.id) : null;
   return allowed.includes(fromId) || allowed.includes(chatId);
@@ -65,6 +34,28 @@ export function isEnabled() {
   return getTelegramStatus().enabled;
 }
 
+/** POST to the Bot API; network/API failures are logged and returned, never thrown. */
+async function telegramApi(method, payload) {
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.ok === false) {
+      log("telegram_error", `${method}: ${JSON.stringify(body).slice(0, 300)}`);
+      return { ok: false, error: body };
+    }
+    return { ok: true, result: body.result };
+  } catch (error) {
+    log("telegram_error", `${method}: ${error.message}`);
+    return { ok: false, error: error.message };
+  }
+}
+
 export async function sendMessage(text, chatId = null) {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   const targetChatId = chatId ?? process.env.TELEGRAM_CHAT_ID?.trim();
@@ -74,19 +65,7 @@ export async function sendMessage(text, chatId = null) {
     return { ok: false, skipped: true, reason: "telegram_not_configured" };
   }
 
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: targetChatId, text: text.slice(0, 4000) }),
-  });
-
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.ok === false) {
-    log("telegram_error", JSON.stringify(body).slice(0, 500));
-    return { ok: false, error: body };
-  }
-  return { ok: true, result: body.result };
+  return telegramApi("sendMessage", { chat_id: targetChatId, text: text.slice(0, 4000) });
 }
 
 export async function editMessage(text, messageId, chatId = null) {
@@ -97,23 +76,7 @@ export async function editMessage(text, messageId, chatId = null) {
     return { ok: false, skipped: true, reason: "telegram_not_configured" };
   }
 
-  const url = `https://api.telegram.org/bot${token}/editMessageText`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: targetChatId,
-      message_id: messageId,
-      text: text.slice(0, 4000),
-    }),
-  });
-
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.ok === false) {
-    log("telegram_error", `editMessage: ${JSON.stringify(body).slice(0, 300)}`);
-    return { ok: false, error: body };
-  }
-  return { ok: true, result: body.result };
+  return telegramApi("editMessageText", { chat_id: targetChatId, message_id: messageId, text: text.slice(0, 4000) });
 }
 
 async function deleteWebhook() {
@@ -159,7 +122,7 @@ export async function startPolling(onMessage) {
     try {
       const token = process.env.TELEGRAM_BOT_TOKEN;
       const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=30`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: AbortSignal.timeout(45_000) });
       const data = await res.json();
 
       if (data.ok === false) {
@@ -176,7 +139,8 @@ export async function startPolling(onMessage) {
           log("telegram_warn", `Ignored message from unauthorized user ${msg.from?.id}`);
           continue;
         }
-        await onMessage(msg);
+        // Not awaited: a slow command (/screen, free-text agent) must not stall polling.
+        Promise.resolve(onMessage(msg)).catch((error) => log("telegram_error", `handler: ${error.message}`));
       }
     } catch (error) {
       log("telegram_error", error.message);
@@ -185,16 +149,3 @@ export async function startPolling(onMessage) {
   };
   poll();
 }
-
-export function ensureConfigFiles() {
-  if (!fs.existsSync(CONFIG_PATH) && fs.existsSync(EXAMPLE_CONFIG)) {
-    fs.copyFileSync(EXAMPLE_CONFIG, CONFIG_PATH);
-    log("setup", "Created user-config.json from example");
-  }
-  if (!fs.existsSync(ENV_PATH) && fs.existsSync(repoPath(".env.example"))) {
-    fs.copyFileSync(repoPath(".env.example"), ENV_PATH);
-    log("setup", "Created .env from example — add your API keys");
-  }
-}
-
-ensureConfigFiles();

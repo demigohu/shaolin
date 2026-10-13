@@ -2,10 +2,8 @@
 import { spawnSync } from "child_process";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
 import { REPO_ROOT } from "../repo-root.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MCP_SRC = path.join(REPO_ROOT, "mcp", "tradingview-mcp");
 const VENV = path.join(REPO_ROOT, "mcp", ".venv");
 const MCP_BIN = path.join(VENV, "bin", "tradingview-mcp");

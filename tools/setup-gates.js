@@ -1,6 +1,6 @@
 import { config } from "../config.js";
 import { roundToPips, toPips, normalizeTpLevels, computeRrRatio } from "./price.js";
-import { getLastSMCContext } from "../smc.js";
+import { sideOfLiquidity } from "../smc.js";
 
 const STRUCTURE_SL_SETUPS = new Set([
   "dip_reclaim_long",
@@ -14,47 +14,63 @@ const STRUCTURE_SL_SETUPS = new Set([
   "sms_bms_rto",
 ]);
 
+const pipSize = () => config.broker.pipSize || 0.1;
+
 function resolveMinSlPips(setupType, mode) {
   const bySetup = config.screening?.minSlPipsBySetup;
   if (setupType && bySetup?.[setupType] != null) return bySetup[setupType];
   return mode.minSlPips ?? 15;
 }
 
-/** Highest support strictly below entry zone (not the zone you're entering at). */
-function findStructureFloor(entry, ctx, zonePips = 2) {
-  const pip = config.broker.pipSize || 0.1;
-  const cutoff = entry - zonePips * pip;
-  const levels = [];
-  for (const s of ctx?.mtf_zones?.supports || []) {
-    if (s.price <= cutoff) levels.push(s.price);
-  }
-  if (ctx?.swing?.swing_low != null && ctx.swing.swing_low <= cutoff) {
-    levels.push(ctx.swing.swing_low);
-  }
-  if (ctx?.pdl != null && ctx.pdl <= cutoff) levels.push(ctx.pdl);
-  const ns = ctx?.ltf?.nearest_support;
-  if (ns != null && ns <= cutoff) levels.push(ns);
+/** Highest structure level strictly below the entry zone. */
+function findStructureFloor(entry, ctx, zonePips) {
+  const cutoff = entry - zonePips * pipSize();
+  const levels = [
+    ...(ctx?.mtf_zones?.zones || []).map((z) => z.price),
+    ctx?.swing?.swing_low,
+    ctx?.pdl,
+  ].filter((p) => p != null && p <= cutoff);
   return levels.length ? Math.max(...levels) : null;
 }
 
-/** Lowest resistance strictly above entry zone. */
-function findStructureCeiling(entry, ctx, zonePips = 2) {
-  const pip = config.broker.pipSize || 0.1;
-  const cutoff = entry + zonePips * pip;
-  const levels = [];
-  for (const r of ctx?.mtf_zones?.resistances || []) {
-    if (r.price >= cutoff) levels.push(r.price);
-  }
-  if (ctx?.swing?.swing_high != null && ctx.swing.swing_high >= cutoff) {
-    levels.push(ctx.swing.swing_high);
-  }
-  if (ctx?.pdh != null && ctx.pdh >= cutoff) levels.push(ctx.pdh);
-  const nr = ctx?.ltf?.nearest_resistance;
-  if (nr != null && nr >= cutoff) levels.push(nr);
+/** Lowest structure level strictly above the entry zone. */
+function findStructureCeiling(entry, ctx, zonePips) {
+  const cutoff = entry + zonePips * pipSize();
+  const levels = [
+    ...(ctx?.mtf_zones?.zones || []).map((z) => z.price),
+    ctx?.swing?.swing_high,
+    ctx?.pdh,
+  ].filter((p) => p != null && p >= cutoff);
   return levels.length ? Math.min(...levels) : null;
 }
 
-export function validateProposedSl(args, _ctx, mode) {
+export function validateConfidence(args, mode) {
+  const min = mode.minConfidence;
+  const conf = Number(args.confidence);
+  if (min == null) return { ok: true };
+  if (!Number.isFinite(conf) || conf < min) {
+    return { ok: false, reason: "confidence_too_low", message: `Confidence ${args.confidence ?? "?"}% < ${min}% minimum for ${mode.id} — WATCH instead.` };
+  }
+  return { ok: true };
+}
+
+/** Block trend-chasing into extreme RSI (reversal setups are exempt). */
+export function validateRsi(args, rsi) {
+  if (config.screening?.blockExtremeRsi === false || typeof rsi !== "number") return { ok: true };
+  const noShort = config.screening.rsiNoShortBelow ?? 35;
+  const noLong = config.screening.rsiNoLongAbove ?? 65;
+  const reversal = String(args.setup_type || "").startsWith("turtle_soup");
+  if (reversal) return { ok: true };
+  if (args.side === "short" && rsi < noShort) {
+    return { ok: false, reason: "rsi_oversold_no_short", message: `RSI ${rsi.toFixed(1)} oversold — no trend short (bounce risk). Turtle soup long or WATCH.` };
+  }
+  if (args.side === "long" && rsi > noLong) {
+    return { ok: false, reason: "rsi_overbought_no_long", message: `RSI ${rsi.toFixed(1)} overbought — no trend long. Turtle soup short or WATCH.` };
+  }
+  return { ok: true };
+}
+
+export function validateProposedSl(args, ctx, mode) {
   const entry = Number(args.entry);
   const sl = Number(args.sl);
   const side = args.side;
@@ -62,108 +78,64 @@ export function validateProposedSl(args, _ctx, mode) {
     return { ok: false, reason: "invalid_sl", message: "Invalid entry or SL." };
   }
 
-  const llmOwns = config.screening?.llmOwnsTpSl !== false;
   const slPips = toPips(Math.abs(entry - sl));
+  if (side === "long" && sl >= entry) return { ok: false, reason: "sl_wrong_side", message: "Long SL must be below entry." };
+  if (side === "short" && sl <= entry) return { ok: false, reason: "sl_wrong_side", message: "Short SL must be above entry." };
 
-  if (side === "long" && sl >= entry) {
-    return { ok: false, reason: "sl_wrong_side", message: "Long SL must be below entry." };
-  }
-  if (side === "short" && sl <= entry) {
-    return { ok: false, reason: "sl_wrong_side", message: "Short SL must be above entry." };
-  }
+  if (config.screening?.llmOwnsTpSl !== false) return { ok: true, sl_pips: slPips };
 
-  if (llmOwns) {
-    return { ok: true, sl_pips: slPips };
-  }
-
-  const pip = config.broker.pipSize || 0.1;
+  const pip = pipSize();
   const minSl = resolveMinSlPips(args.setup_type, mode);
   const maxSl = mode.maxSlPips ?? 40;
   const bufferPips = config.screening?.slStructureBufferPips ?? 3;
-  const ctx = _ctx;
 
   if (slPips < minSl) {
-    return {
-      ok: false,
-      reason: "sl_too_tight",
-      sl_pips: slPips,
-      min_sl_pips: minSl,
-      message: `SL ${slPips}p too tight (min ${minSl}p) — place below next structure level.`,
-    };
+    return { ok: false, reason: "sl_too_tight", sl_pips: slPips, min_sl_pips: minSl, message: `SL ${slPips}p too tight (min ${minSl}p) — place beyond next structure level.` };
   }
   if (maxSl != null && slPips > maxSl) {
-    return {
-      ok: false,
-      reason: "sl_too_wide",
-      sl_pips: slPips,
-      max_sl_pips: maxSl,
-      message: `SL ${slPips}p exceeds max ${maxSl}p.`,
-    };
+    return { ok: false, reason: "sl_too_wide", sl_pips: slPips, max_sl_pips: maxSl, message: `SL ${slPips}p exceeds max ${maxSl}p.` };
   }
+  if (!STRUCTURE_SL_SETUPS.has(args.setup_type) || !ctx) return { ok: true, sl_pips: slPips };
 
-  if (!STRUCTURE_SL_SETUPS.has(args.setup_type) || !ctx) {
-    return { ok: true, sl_pips: slPips };
-  }
-
-  const events = ctx.liquidity_events || [];
+  const raids = sideOfLiquidity(ctx.liquidity_events);
   const zonePips = mode.entryZonePips ?? 3;
-  const belowSweepPips = config.smc?.slBelowSweepPips ?? 10;
+  const sweepPips = config.smc?.slBelowSweepPips ?? 10;
 
   if (side === "long") {
     const refs = [];
     const floor = findStructureFloor(entry, ctx, zonePips);
-    if (floor != null) {
-      const structSl = floor - bufferPips * pip;
-      const structDistPips = toPips(entry - structSl);
-      if (structDistPips <= maxSl) refs.push(structSl);
-    }
-
-    if (events.some((e) => e.startsWith("ssl_"))) {
-      const sweepRef = Math.min(entry, ctx.price ?? entry);
-      refs.push(sweepRef - belowSweepPips * pip);
-    }
-
+    if (floor != null && toPips(entry - (floor - bufferPips * pip)) <= maxSl) refs.push(floor - bufferPips * pip);
+    if (raids.ssl) refs.push(Math.min(entry, ctx.price ?? entry) - sweepPips * pip);
     if (refs.length) {
       const maxAllowedSl = Math.min(...refs);
       if (sl > maxAllowedSl + pip * 0.01) {
-        const needPips = toPips(entry - maxAllowedSl);
+        const needPips = Math.max(minSl, toPips(entry - maxAllowedSl));
         return {
           ok: false,
           reason: "sl_above_structure",
           sl_pips: slPips,
-          min_sl_pips: Math.max(minSl, needPips),
-          structure_level: roundToPips(Math.min(...refs) + bufferPips * pip),
+          min_sl_pips: needPips,
           suggested_max_sl: roundToPips(maxAllowedSl),
-          message: `SL ${sl} too high — need ≥${Math.max(minSl, needPips)}p below entry (below sweep/structure ~${roundToPips(maxAllowedSl + bufferPips * pip)}).`,
+          message: `SL ${sl} sits inside structure — move to ≤${roundToPips(maxAllowedSl)} (≥${needPips}p below entry).`,
         };
       }
     }
   } else {
     const refs = [];
     const ceiling = findStructureCeiling(entry, ctx, zonePips);
-    if (ceiling != null) {
-      const structSl = ceiling + bufferPips * pip;
-      const structDistPips = toPips(structSl - entry);
-      if (structDistPips <= maxSl) refs.push(structSl);
-    }
-
-    if (events.some((e) => e.startsWith("bsl_"))) {
-      const sweepRef = Math.max(entry, ctx.price ?? entry);
-      refs.push(sweepRef + belowSweepPips * pip);
-    }
-
+    if (ceiling != null && toPips(ceiling + bufferPips * pip - entry) <= maxSl) refs.push(ceiling + bufferPips * pip);
+    if (raids.bsl) refs.push(Math.max(entry, ctx.price ?? entry) + sweepPips * pip);
     if (refs.length) {
       const minAllowedSl = Math.max(...refs);
       if (sl < minAllowedSl - pip * 0.01) {
-        const needPips = toPips(minAllowedSl - entry);
+        const needPips = Math.max(minSl, toPips(minAllowedSl - entry));
         return {
           ok: false,
           reason: "sl_below_structure",
           sl_pips: slPips,
-          min_sl_pips: Math.max(minSl, needPips),
-          structure_level: roundToPips(minAllowedSl - bufferPips * pip),
+          min_sl_pips: needPips,
           suggested_min_sl: roundToPips(minAllowedSl),
-          message: `SL ${sl} too low — need ≥${Math.max(minSl, needPips)}p above entry (above sweep/structure ~${roundToPips(minAllowedSl - bufferPips * pip)}).`,
+          message: `SL ${sl} sits inside structure — move to ≥${roundToPips(minAllowedSl)} (≥${needPips}p above entry).`,
         };
       }
     }
@@ -177,60 +149,30 @@ export function validateSetupReason(args) {
 
   const reason = String(args.reason || "").trim();
   const slAnchor = String(args.sl_anchor || "").trim();
-  const sl = Number(args.sl);
-  const entry = Number(args.entry);
 
   if (reason.length < 50) {
-    return {
-      ok: false,
-      reason: "reason_too_short",
-      message: "reason must explain DIP→ENTRY thesis (≥50 chars). SL/TP structure goes in sl_anchor + tp_levels[].label.",
-    };
+    return { ok: false, reason: "reason_too_short", message: "reason must explain DIP→ENTRY thesis (≥50 chars). SL/TP structure goes in sl_anchor + tp_levels[].label." };
   }
-
   if (slAnchor.length < 12) {
-    return {
-      ok: false,
-      reason: "sl_anchor_required",
-      message: 'sl_anchor required — e.g. "above 1H high 4396.89 + buffer" or "below PDL sweep 4345".',
-    };
+    return { ok: false, reason: "sl_anchor_required", message: 'sl_anchor required — e.g. "above 1H high 4396.89 + buffer" or "below PDL sweep 4345".' };
   }
-
-  if (!/\b(support|resistance|fib|sweep|snr|pdh|pdl|asian|ote|supply|demand|high|low|bsl|ssl|ob|order block|swing)\b/i.test(slAnchor)) {
-    return {
-      ok: false,
-      reason: "sl_anchor_no_structure",
-      message: "sl_anchor must name the structure level SL sits beyond (not just pip count).",
-    };
+  if (!/\b(support|resistance|fib|sweep|snr|pdh|pdl|pwh|pwl|asian|ote|supply|demand|high|low|bsl|ssl|ob|order block|swing)\b/i.test(slAnchor)) {
+    return { ok: false, reason: "sl_anchor_no_structure", message: "sl_anchor must name the structure level SL sits beyond (not just pip count)." };
   }
 
   if (Array.isArray(args.tp_levels) && args.tp_levels.length) {
-    const missingLabel = args.tp_levels.filter((t) => String(t.label || "").trim().length < 8);
-    if (missingLabel.length) {
-      return {
-        ok: false,
-        reason: "tp_label_required",
-        message: 'Each tp_levels needs label — e.g. "MTF support 4389.9 / 4H demand".',
-      };
+    if (args.tp_levels.some((t) => String(t.label || "").trim().length < 8)) {
+      return { ok: false, reason: "tp_label_required", message: 'Each tp_levels needs label — e.g. "MTF support 4389.9 / 4H demand".' };
     }
-    const weakLabel = args.tp_levels.filter(
-      (t) => !/\b(support|resistance|fib|snr|pdh|pdl|asian|supply|demand|target|ote|swing|low|high)\b/i.test(String(t.label)),
-    );
-    if (weakLabel.length) {
-      return {
-        ok: false,
-        reason: "tp_label_no_structure",
-        message: "Each tp_levels.label must name the SNR/fib target (support, resistance, fib, etc.).",
-      };
+    if (args.tp_levels.some((t) => !/\b(support|resistance|fib|snr|pdh|pdl|pwh|pwl|asian|supply|demand|target|ote|swing|low|high|liquidity|bsl|ssl)\b/i.test(String(t.label)))) {
+      return { ok: false, reason: "tp_label_no_structure", message: "Each tp_levels.label must name the SNR/fib target (support, resistance, fib, etc.)." };
     }
   }
 
-  if (Number.isFinite(entry) && Number.isFinite(sl) && Math.abs(entry - sl) < (config.broker.pipSize || 0.1) * 5) {
-    return {
-      ok: false,
-      reason: "sl_on_entry",
-      message: "SL too close to entry — place beyond the next structure level, not on the entry zone.",
-    };
+  const entry = Number(args.entry);
+  const sl = Number(args.sl);
+  if (Number.isFinite(entry) && Number.isFinite(sl) && Math.abs(entry - sl) < pipSize() * 5) {
+    return { ok: false, reason: "sl_on_entry", message: "SL too close to entry — place beyond the next structure level, not on the entry zone." };
   }
 
   return { ok: true };
@@ -239,7 +181,6 @@ export function validateSetupReason(args) {
 /** Min RR without tightening SL — extend TP to next SNR/fib instead. */
 export function validateMinRr(args, mode) {
   if (config.screening?.enforceMinRr === false) return { ok: true };
-
   const minRr = mode.minRrRatio ?? 1.2;
   if (minRr <= 0) return { ok: true };
 
@@ -252,6 +193,8 @@ export function validateMinRr(args, mode) {
   const minRewardPips = Math.ceil(riskPips * minRr);
 
   if (!Array.isArray(args.tp_levels) || !args.tp_levels.length) {
+    // Template TPs (llmOwnsTpSl=false) are generated from mode.partialTp RR multiples.
+    if (config.screening?.llmOwnsTpSl === false) return { ok: true };
     return {
       ok: false,
       reason: "tp_required_for_rr",
@@ -263,15 +206,10 @@ export function validateMinRr(args, mode) {
 
   const tpLevels = normalizeTpLevels(side, entry, sl, args.tp_levels);
   if (!tpLevels.length) {
-    return {
-      ok: false,
-      reason: "invalid_tp_levels",
-      message: "tp_levels must be on profit side of entry (long: above, short: below).",
-    };
+    return { ok: false, reason: "invalid_tp_levels", message: "tp_levels must be on profit side of entry (long: above, short: below)." };
   }
 
-  const tpFinal = tpLevels[tpLevels.length - 1].price;
-  const rr = computeRrRatio(side, entry, sl, tpFinal);
+  const rr = computeRrRatio(side, entry, sl, tpLevels.at(-1).price);
   if (rr < minRr) {
     return {
       ok: false,
@@ -283,155 +221,71 @@ export function validateMinRr(args, mode) {
       message: `RR ${rr} < ${minRr}. Keep SL at ${sl} (${riskPips}p) — extend TP final to next SNR/fib ≥${minRewardPips}p from entry. Never tighten SL to fix RR.`,
     };
   }
-
   return { ok: true, rr_ratio: rr };
 }
 
+/** Normalized TP ladder, or none (template TPs are filled in by createSetup). */
 export function validateProposedTp(args) {
-  const llmOwns = config.screening?.llmOwnsTpSl !== false;
-  if (!Array.isArray(args.tp_levels) || !args.tp_levels.length) {
-    return { ok: true, tp_source: llmOwns ? "llm_none" : "default" };
-  }
-
-  const entry = Number(args.entry);
-  const sl = Number(args.sl);
-  const side = args.side;
-  const normalized = normalizeTpLevels(side, entry, sl, args.tp_levels);
+  if (!Array.isArray(args.tp_levels) || !args.tp_levels.length) return { ok: true };
+  const normalized = normalizeTpLevels(args.side, Number(args.entry), Number(args.sl), args.tp_levels);
   if (!normalized.length) {
-    if (llmOwns) {
-      return { ok: true, tp_source: "llm_none" };
-    }
-    return {
-      ok: false,
-      reason: "invalid_tp_levels",
-      message: "tp_levels must be prices on the profit side of entry (long: above entry, short: below).",
-    };
+    return { ok: false, reason: "invalid_tp_levels", message: "tp_levels must be prices on the profit side of entry (long: above entry, short: below)." };
   }
-
-  return { ok: true, tp_source: "llm", tp_levels: normalized };
+  if (normalized.length < args.tp_levels.length) {
+    return { ok: false, reason: "invalid_tp_levels", message: "Some tp_levels are on the wrong side of entry — every TP must be in profit direction." };
+  }
+  return { ok: true, tp_levels: normalized };
 }
 
-const LIMIT_SETUP_TYPES = new Set([
-  "fib_retrace",
-  "dip_reclaim_long",
-  "dip_reclaim_short",
-  "snr_bounce_long",
-  "snr_bounce_short",
-  "sh_bms_rto",
-  "sms_bms_rto",
-]);
-
-export async function resolveProposePrice(market) {
-  const ctx = getLastSMCContext();
-  if (ctx?.price != null) return ctx.price;
-  try {
-    const quote = await market.getManagementPrice();
-    return quote?.price ?? null;
-  } catch {
-    return null;
-  }
-}
-
+/**
+ * Entry sanity vs live price:
+ * - market: entry within maxEntrySlippagePips (default entryZonePips) of price
+ * - limit: on the retrace side of price (long ≤ price, short ≥ price) and ≤ maxLimitEntryPips away
+ */
 export function validateProposedEntry(args, price, mode) {
-  const llmOwns = config.screening?.llmOwnsTpSl !== false;
   const entry = Number(args.entry);
-  const entryStyle = args.entry_style === "limit" || args.entry_style === "market"
-    ? args.entry_style
-    : (llmOwns && LIMIT_SETUP_TYPES.has(args.setup_type) ? "limit" : "market");
-
-  if (llmOwns) {
-    if (!Number.isFinite(entry)) {
-      return { ok: false, reason: "invalid_entry", message: "Entry price required." };
-    }
-    return {
-      ok: true,
-      entry_style: entryStyle,
-      entry,
-      distPips: price != null ? toPips(Math.abs(price - entry)) : null,
-      price_at_propose: price,
-    };
+  if (!Number.isFinite(entry)) return { ok: false, reason: "invalid_entry", message: "Entry price required." };
+  if (price == null) {
+    return { ok: false, reason: "no_price", message: "Cannot validate entry — live price unavailable. WATCH and retry next cycle." };
   }
 
+  const pip = pipSize();
   const zonePips = mode.entryZonePips ?? 3;
   const maxMarketPips = config.screening?.maxEntrySlippagePips ?? zonePips;
-  const maxLimitPips = mode.maxLimitEntryPips
-    ?? config.screening?.maxLimitEntryPips
-    ?? mode.maxStaleDistancePips
-    ?? config.screening?.maxStaleDistancePips
-    ?? 25;
-
-  if (config.screening?.requireEntryNearPrice === false) {
-    return {
-      ok: true,
-      entry_style: entryStyle,
-      distPips: price != null ? toPips(Math.abs(entry - price)) : null,
-      price_at_propose: price,
-    };
-  }
-
-  if (price == null) {
-    return {
-      ok: false,
-      reason: "no_price",
-      message: "Cannot validate entry — live price unavailable. Retry or WATCH.",
-    };
-  }
-
+  const maxLimitPips = mode.maxLimitEntryPips ?? config.screening?.maxLimitEntryPips ?? 25;
   const distPips = toPips(Math.abs(price - entry));
-  let resolvedStyle = entryStyle;
 
-  if (!args.entry_style || !["limit", "market"].includes(args.entry_style)) {
-    if (distPips <= maxMarketPips) resolvedStyle = "market";
-    else if (LIMIT_SETUP_TYPES.has(args.setup_type)) resolvedStyle = "limit";
-    else resolvedStyle = "market";
-  }
+  let entryStyle = args.entry_style;
+  if (entryStyle !== "limit" && entryStyle !== "market") entryStyle = distPips <= maxMarketPips ? "market" : "limit";
 
-  if (resolvedStyle === "market") {
+  const base = { entry_style: entryStyle, distPips, price_at_propose: price };
+  if (config.screening?.requireEntryNearPrice === false) return { ok: true, ...base };
+
+  if (entryStyle === "market") {
     if (distPips > maxMarketPips) {
-      const maxSnap = maxLimitPips;
-      if (distPips <= maxSnap) {
-        return {
-          ok: true,
-          entry_style: "market",
-          distPips: 0,
-          price_at_propose: price,
-          entry: price,
-          entry_snapped_from: entry,
-        };
-      }
       return {
         ok: false,
         reason: "entry_too_far",
-        message: `Market entry must be within ${maxMarketPips}p of price ${price} (entry ${entry} is ${distPips}p away). Use entry_style "limit" for retrace OR WATCH.`,
-        distPips,
-        price_at_propose: price,
-        entry_style: resolvedStyle,
+        ...base,
+        message: `Market entry must be within ${maxMarketPips}p of price ${price} (entry ${entry} is ${distPips}p away). Use entry_style "limit" for a retrace, or WATCH.`,
       };
     }
-  } else if (distPips > maxLimitPips) {
-    return {
-      ok: false,
-      reason: "limit_entry_too_far",
-      message: `Limit entry ${distPips}p from price (max ${maxLimitPips}p). Too far to wait — WATCH for closer level.`,
-      distPips,
-      price_at_propose: price,
-      entry_style: resolvedStyle,
-    };
+    return { ok: true, ...base };
   }
 
-  return {
-    ok: true,
-    entry_style: resolvedStyle,
-    distPips,
-    price_at_propose: price,
-  };
-}
-
-export function isInEntryZone(setup, price, zonePips) {
-  if (price == null || setup?.entry == null) return false;
-  const pip = config.broker.pipSize || 0.1;
-  const zone = (zonePips ?? 3) * pip;
-  return Math.abs(price - setup.entry) <= zone;
+  const wrongSide = args.side === "long" ? entry > price + zonePips * pip : entry < price - zonePips * pip;
+  if (wrongSide) {
+    return {
+      ok: false,
+      reason: "limit_wrong_side",
+      ...base,
+      message: `${args.side} limit at ${entry} is on the breakout side of price ${price} — a limit fills on retrace (long below price, short above). Use market on reclaim or WATCH.`,
+    };
+  }
+  if (distPips > maxLimitPips) {
+    return { ok: false, reason: "limit_entry_too_far", ...base, message: `Limit entry ${distPips}p from price (max ${maxLimitPips}p). Too far to wait — WATCH for a closer level.` };
+  }
+  return { ok: true, ...base };
 }
 
 export function distanceFromEntryPips(setup, price) {
@@ -439,19 +293,24 @@ export function distanceFromEntryPips(setup, price) {
   return toPips(Math.abs(price - setup.entry));
 }
 
+/** A resting limit fills once price trades to the entry (within the zone tolerance) or through it. */
+export function isLimitFilled(setup, price, zonePips) {
+  if (price == null || setup?.entry == null) return false;
+  const zone = (zonePips ?? 3) * pipSize();
+  return setup.side === "long" ? price <= setup.entry + zone : price >= setup.entry - zone;
+}
+
+/** Unfilled limit is stale once price has run maxStale pips further away than when it was proposed. */
 export function shouldExpireStaleByDistance(setup, price, mode) {
-  if (setup.status !== "proposed" || setup.entry_style !== "limit") return false;
-  const maxStale = mode.maxStaleDistancePips
-    ?? config.screening?.maxStaleDistancePips
-    ?? 15;
+  if (setup.status !== "proposed" || setup.entry_style !== "limit" || price == null) return false;
+  const maxStale = mode.maxStaleDistancePips ?? config.screening?.maxStaleDistancePips ?? 15;
+  const awayFromEntry = setup.side === "long" ? price > setup.entry : price < setup.entry;
+  if (!awayFromEntry) return false;
   const dist = distanceFromEntryPips(setup, price);
-  return dist != null && dist > maxStale;
+  return dist > (setup.entry_distance_pips ?? 0) + maxStale;
 }
 
 export function shouldInvalidatePreFill(setup, price) {
-  if (setup.status !== "proposed") return false;
-  const { side, sl } = setup;
-  if (side === "long" && price <= sl) return true;
-  if (side === "short" && price >= sl) return true;
-  return false;
+  if (setup.status !== "proposed" || price == null) return false;
+  return setup.side === "long" ? price <= setup.sl : price >= setup.sl;
 }

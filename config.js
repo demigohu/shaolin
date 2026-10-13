@@ -3,6 +3,11 @@ import fs from "fs";
 import { REPO_ROOT, repoPath } from "./repo-root.js";
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
+const EXAMPLE_CONFIG_PATH = repoPath("user-config.example.json");
+
+if (!fs.existsSync(USER_CONFIG_PATH) && fs.existsSync(EXAMPLE_CONFIG_PATH)) {
+  fs.copyFileSync(EXAMPLE_CONFIG_PATH, USER_CONFIG_PATH);
+}
 
 /** Custom RPC (non-OpenRouter): prefer LLM_MODEL from .env over stale openrouter/* in user-config. */
 function resolveLlmModel(configured) {
@@ -15,15 +20,22 @@ function resolveLlmModel(configured) {
   return configured ?? envModel ?? "openrouter/healer-alpha";
 }
 
-const u = fs.existsSync(USER_CONFIG_PATH)
-  ? JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"))
-  : {};
+function readUserConfig() {
+  if (!fs.existsSync(USER_CONFIG_PATH)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
+  } catch (error) {
+    throw new Error(`user-config.json is not valid JSON: ${error.message}`);
+  }
+}
+
+const u = readUserConfig();
 
 if (u.llmModel) process.env.LLM_MODEL ||= u.llmModel;
 if (u.llmBaseUrl) process.env.LLM_BASE_URL ||= u.llmBaseUrl;
 if (u.llmApiKey) process.env.LLM_API_KEY ||= u.llmApiKey;
+if (u.telegramBotToken) process.env.TELEGRAM_BOT_TOKEN ||= String(u.telegramBotToken);
 if (u.telegramChatId) process.env.TELEGRAM_CHAT_ID ||= String(u.telegramChatId);
-if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
 
 const defaultModes = {
   scalp: {
@@ -51,6 +63,10 @@ const defaultModes = {
     managementIntervalMin: 5,
     setupMaxAgeMin: 480,
     entryZonePips: 5,
+    maxSlPips: 80,
+    minSlPips: 20,
+    maxStaleDistancePips: 40,
+    maxLimitEntryPips: 60,
     minConfidence: 65,
     minRrRatio: 1.5,
     combinedTimeframe: "1h",
@@ -64,6 +80,10 @@ const defaultModes = {
     managementIntervalMin: 30,
     setupMaxAgeMin: 7200,
     entryZonePips: 15,
+    maxSlPips: 300,
+    minSlPips: 50,
+    maxStaleDistancePips: 150,
+    maxLimitEntryPips: 200,
     minConfidence: 70,
     minRrRatio: 2.0,
     combinedTimeframe: "4h",
@@ -72,11 +92,22 @@ const defaultModes = {
   },
 };
 
+function mergeModes(userModes = {}) {
+  const ids = new Set([...Object.keys(defaultModes), ...Object.keys(userModes)]);
+  return Object.fromEntries([...ids].map((id) => [id, { ...(defaultModes[id] || {}), ...(userModes[id] || {}) }]));
+}
+
+const s = u.screening || {};
+const n = u.notifications || {};
+const m = u.management || {};
+
 export const config = {
   activeMode: u.activeMode ?? "scalp",
   market: {
     dataSymbol: u.dataSymbol ?? u.market?.dataSymbol ?? "XAUUSD",
-    dataExchange: u.dataExchange ?? u.market?.dataExchange ?? "OANDA",
+    dataExchange: u.dataExchange ?? u.market?.dataExchange ?? "TVC",
+    // The MCP resolves XAUUSD to TradingView's TVC:GOLD spot CFD feed regardless of exchange.
+    feedLabel: u.market?.feedLabel ?? "TVC:GOLD",
     displayName: u.displayName ?? u.market?.displayName ?? "XAUUSD",
     yahooSymbol: u.yahooSymbol ?? u.market?.yahooSymbol ?? "GC=F",
   },
@@ -88,51 +119,47 @@ export const config = {
     spreadPips: u.broker?.spreadPips ?? null,
     priceOffset: u.priceOffset ?? u.broker?.priceOffset ?? 0,
   },
-  modes: { ...defaultModes, ...(u.modes || {}) },
+  modes: mergeModes(u.modes),
   screening: {
-    maxSetupsPerDay: u.screening?.maxSetupsPerDay ?? u.maxSetupsPerDay ?? 8,
-    newsBlackoutMinutes: u.newsBlackoutMinutes ?? 0,
-    nearTpSlAlertPct: u.nearTpSlAlertPct ?? 80,
-    blockExtremeRsi: u.screening?.blockExtremeRsi !== false,
-    rsiNoShortBelow: u.screening?.rsiNoShortBelow ?? 35,
-    rsiNoLongAbove: u.screening?.rsiNoLongAbove ?? 65,
-    requireEntryNearPrice: u.screening?.requireEntryNearPrice !== false,
-    maxEntrySlippagePips: u.screening?.maxEntrySlippagePips ?? null,
-    maxLimitEntryPips: u.screening?.maxLimitEntryPips ?? null,
-    maxStaleDistancePips: u.screening?.maxStaleDistancePips ?? 15,
-    skipWeekends: u.screening?.skipWeekends !== false,
-    llmOwnsTpSl: u.screening?.llmOwnsTpSl !== false,
-    enforceMinRr: u.screening?.enforceMinRr !== false,
-    slStructureBufferPips: u.screening?.slStructureBufferPips ?? 3,
-    minSlPipsBySetup: u.screening?.minSlPipsBySetup ?? {
-      turtle_soup_long: 20,
-      turtle_soup_short: 20,
-    },
+    maxSetupsPerDay: s.maxSetupsPerDay ?? u.maxSetupsPerDay ?? 8,
+    nearTpSlAlertPct: s.nearTpSlAlertPct ?? u.nearTpSlAlertPct ?? 80,
+    blockExtremeRsi: s.blockExtremeRsi !== false,
+    rsiNoShortBelow: s.rsiNoShortBelow ?? 35,
+    rsiNoLongAbove: s.rsiNoLongAbove ?? 65,
+    requireEntryNearPrice: s.requireEntryNearPrice !== false,
+    maxEntrySlippagePips: s.maxEntrySlippagePips ?? null,
+    maxLimitEntryPips: s.maxLimitEntryPips ?? null,
+    maxStaleDistancePips: s.maxStaleDistancePips ?? 15,
+    skipWeekends: s.skipWeekends !== false,
+    llmOwnsTpSl: s.llmOwnsTpSl !== false,
+    enforceMinRr: s.enforceMinRr !== false,
+    slStructureBufferPips: s.slStructureBufferPips ?? 3,
+    minSlPipsBySetup: s.minSlPipsBySetup ?? { turtle_soup_long: 20, turtle_soup_short: 20 },
   },
   management: {
-    breakevenAlertAfterTp1: u.breakevenAlertAfterTp1 ?? true,
-    fastPollEnabled: u.management?.fastPollEnabled !== false,
-    fastPollSec: u.management?.fastPollSec ?? 45,
-    priceStreamTelegram: u.management?.priceStreamTelegram !== false,
-    priceStreamEditMinSec: u.management?.priceStreamEditMinSec ?? 15,
+    breakevenAlertAfterTp1: m.breakevenAlertAfterTp1 ?? u.breakevenAlertAfterTp1 ?? true,
+    fastPollEnabled: m.fastPollEnabled !== false,
+    fastPollSec: m.fastPollSec ?? 45,
+    priceStreamTelegram: m.priceStreamTelegram !== false,
+    priceStreamEditMinSec: m.priceStreamEditMinSec ?? 15,
   },
   notifications: {
-    enabled: u.notifications?.enabled !== false,
-    notifyScreeningDigest: u.notifications?.notifyScreeningDigest ?? true,
-    notifyManagementDigest: u.notifications?.notifyManagementDigest ?? true,
-    notifyScreeningResult: u.notifications?.notifyScreeningResult ?? true,
-    notifyOpenSetupSkip: u.notifications?.notifyOpenSetupSkip ?? true,
-    notifySessionSkip: u.notifications?.notifySessionSkip ?? false,
-    notifyWeekendSkip: u.notifications?.notifyWeekendSkip ?? false,
-    digestEveryManagementCycles: u.notifications?.digestEveryManagementCycles ?? 5,
-    digestEveryScreeningCycles: u.notifications?.digestEveryScreeningCycles ?? 1,
+    enabled: n.enabled !== false,
+    notifyScreeningDigest: n.notifyScreeningDigest ?? true,
+    notifyManagementDigest: n.notifyManagementDigest ?? true,
+    notifyScreeningResult: n.notifyScreeningResult ?? true,
+    notifyOpenSetupSkip: n.notifyOpenSetupSkip ?? true,
+    notifySessionSkip: n.notifySessionSkip ?? false,
+    notifyWeekendSkip: n.notifyWeekendSkip ?? false,
+    digestEveryManagementCycles: n.digestEveryManagementCycles ?? 5,
+    digestEveryScreeningCycles: n.digestEveryScreeningCycles ?? 1,
     cooldownMin: {
-      off_session: u.notifications?.cooldownMin?.off_session ?? 240,
-      open_setup_skip: u.notifications?.cooldownMin?.open_setup_skip ?? 15,
-      management_digest: u.notifications?.cooldownMin?.management_digest ?? 15,
-      screening_digest: u.notifications?.cooldownMin?.screening_digest ?? 15,
-      screen_watch: u.notifications?.cooldownMin?.screen_watch ?? 30,
-      ...(u.notifications?.cooldownMin || {}),
+      off_session: 240,
+      open_setup_skip: 15,
+      management_digest: 15,
+      screening_digest: 15,
+      screen_watch: 30,
+      ...(n.cooldownMin || {}),
     },
   },
   llm: {
@@ -140,27 +167,16 @@ export const config = {
     maxTokens: u.maxTokens ?? u.llm?.maxTokens ?? 4096,
     maxSteps: u.maxSteps ?? u.llm?.maxSteps ?? 15,
     screeningModel: resolveLlmModel(u.screeningModel ?? u.llm?.screeningModel),
-    managementModel: resolveLlmModel(u.managementModel ?? u.llm?.managementModel),
     generalModel: resolveLlmModel(u.generalModel ?? u.llm?.generalModel),
   },
-  strategy: {
-    requireBacktestApproval: u.requireBacktestApproval ?? false,
-    activeStrategyId: u.activeStrategyId ?? "scalp_mtf_default",
-    backtestPeriod: u.strategy?.backtestPeriod ?? "1y",
-    backtestInterval: u.strategy?.backtestInterval ?? "1h",
-    minSharpe: u.strategy?.minSharpe ?? 0.5,
-  },
-  darwin: {
-    enabled: u.darwin?.enabled ?? true,
-    windowDays: u.darwin?.windowDays ?? 60,
-    minSamples: u.darwin?.minSamples ?? 8,
-    boostFactor: u.darwin?.boostFactor ?? 1.05,
-    decayFactor: u.darwin?.decayFactor ?? 0.95,
-    weightFloor: u.darwin?.weightFloor ?? 0.3,
-    weightCeiling: u.darwin?.weightCeiling ?? 2.5,
-    recalcEveryN: u.darwin?.recalcEveryN ?? 5,
+  performanceGate: {
+    enabled: u.performanceGate?.enabled !== false,
+    windowDays: u.performanceGate?.windowDays ?? 60,
+    minTrades: u.performanceGate?.minTrades ?? 5,
+    maxWinRate: u.performanceGate?.maxWinRate ?? 30,
   },
   setupMemory: {
+    zonePips: u.setupMemory?.zonePips ?? 50,
     cooldownMinSetups: u.setupMemory?.cooldownMinSetups ?? 3,
     cooldownMaxWinRate: u.setupMemory?.cooldownMaxWinRate ?? 25,
     cooldownHours: u.setupMemory?.cooldownHours ?? 24,
@@ -170,19 +186,20 @@ export const config = {
     minConfluence: u.smc?.minConfluence ?? 2,
     requireTradingWindow: u.smc?.requireTradingWindow ?? true,
     blockTrendFollowAtLiquidity: u.smc?.blockTrendFollowAtLiquidity !== false,
-    bootstrapAsianRange: u.smc?.bootstrapAsianRange !== false,
-    asianRangeMaxPips: u.smc?.asianRangeMaxPips ?? 50,
     asianNearPips: u.smc?.asianNearPips ?? 5,
     asianRangeMinPips: u.smc?.asianRangeMinPips ?? 5,
     slBelowSweepPips: u.smc?.slBelowSweepPips ?? 10,
   },
   mtfZones: {
     enabled: u.mtfZones?.enabled !== false,
-    mergePips: u.mtfZones?.mergePips ?? 8,
-    proximityPips: u.mtfZones?.proximityPips ?? 5,
     minZoneStrength: u.mtfZones?.minZoneStrength ?? 3,
-    timeframes: u.mtfZones?.timeframes ?? ["4h", "1h", "15m", "5m"],
   },
 };
+
+/** Persist top-level keys back to user-config.json (e.g. activeMode from /mode). */
+export function saveUserConfigPatch(patch) {
+  const current = readUserConfig();
+  fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify({ ...current, ...patch }, null, 2));
+}
 
 export { REPO_ROOT, repoPath };

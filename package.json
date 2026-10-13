@@ -12,14 +12,15 @@
     "postinstall": "node scripts/setup-mcp.js --check",
     "mcp:install": "node scripts/setup-mcp.js",
     "mcp:smoke": "node scripts/smoke-mcp.js",
-    "dev": "DRY_RUN=true node index.js",
+    "dev": "node --watch index.js",
     "start": "node index.js",
     "pm2:start": "pm2 start ecosystem.config.cjs",
     "pm2:restart": "pm2 restart shaolin --update-env",
     "pm2:stop": "pm2 stop shaolin",
     "pm2:logs": "pm2 logs shaolin",
-    "test": "npm run test:syntax",
-    "test:syntax": "find . -path ./node_modules -prune -o -path ./mcp -prune -o -name '*.js' -exec node --check {} \\;"
+    "test": "npm run test:syntax && npm run test:unit",
+    "test:syntax": "find . -path ./node_modules -prune -o -path ./mcp -prune -o -name '*.js' -exec node --check {} \\;",
+    "test:unit": "node --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.14.0",

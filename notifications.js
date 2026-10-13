@@ -1,7 +1,6 @@
 import { getCurrentSession } from "./modes.js";
 import { config } from "./config.js";
-import { toPips } from "./tools/price.js";
-import { formatPriceDual } from "./tools/price.js";
+import { toPips, formatPriceDual } from "./tools/price.js";
 
 const lastTelegramAt = new Map();
 const DEFAULT_COOLDOWN_MIN = 60;
@@ -20,16 +19,12 @@ export function shouldNotifyTelegram(key, cooldownMinutes = null) {
   return true;
 }
 
-export function resetNotifyCooldown(key) {
-  lastTelegramAt.delete(key);
-}
-
 export function formatWeekendSkip(mode) {
   const day = new Date().toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
   return [
     "⏸ SHAOLIN — Screening skipped (weekend)",
     `Mode: ${mode.id} | UTC day: ${day}`,
-    "XAUUSD tidak trade Sabtu/Minggu — data stale, no SETUP.",
+    "XAUUSD tutup Jumat 17:00 s/d Minggu 18:00 waktu New York — data stale, no SETUP.",
     "Management tetap jalan untuk open setups.",
     "Tip: screening.skipWeekends: false di user-config kalau mau force test.",
   ].join("\n");
@@ -63,7 +58,7 @@ function formatSetupLine(setup) {
   return [
     `${setup.side.toUpperCase()} ${setup.id}`,
     `Entry ${setup.entry} | SL ${setup.sl} (${setup.sl_pips}p)`,
-    tps || `TP ${setup.tp}`,
+    tps || "no TP",
   ].join("\n");
 }
 
@@ -105,7 +100,7 @@ export function formatSetupStatus(setup, price) {
   });
 
   const lines = [
-    `${setup.side.toUpperCase()} \`${setup.id}\`${setup.entry_style ? ` [${setup.entry_style}]` : ""}`,
+    `${setup.side.toUpperCase()} ${setup.id}${setup.entry_style ? ` [${setup.entry_style}]` : ""}`,
   ];
   if (waiting) {
     lines.push(`  ⏳ LIMIT waiting — entry ${entry} (${distEntryPips}p away)`);
@@ -143,9 +138,9 @@ export function formatSetupAlert(setup) {
     "",
     `Entry  ${formatPriceDual(setup.entry)}`,
     slLine,
-    tps || `TP     ${formatPriceDual(setup.tp)}`,
+    tps || "TP     none",
     "",
-    `RR ${setup.rr_ratio} | Conf ${setup.confidence}%`,
+    `RR ${setup.rr_ratio ?? "?"} | Conf ${setup.confidence}%`,
     "",
     setup.reason?.slice(0, 280) || "",
     setup.risks?.length ? `\n⚠️ ${setup.risks.slice(0, 3).join(" · ")}` : "",
@@ -187,6 +182,6 @@ export function formatPriceStream(open, price) {
     lines.push(formatSetupStatus(setup, price));
     lines.push("");
   }
-  lines.push("_Updates in-place. TP/SL alerts sent separately._");
+  lines.push("Updates in-place. TP/SL alerts sent separately.");
   return lines.join("\n").trim();
 }

@@ -2,20 +2,16 @@ import { config } from "../config.js";
 import { callMcpTool } from "./mcp-client.js";
 import { getActiveMode } from "../modes.js";
 import { log } from "../logger.js";
-import { getAsianRange } from "../smc-state.js";
-import { buildMtfZoneStack, formatMtfZonesForPrompt } from "../mtf-zones.js";
+import { getRecentBasis } from "./candles.js";
+
+const ANALYSIS_TTL_MS = 30_000;
+const analysisCache = new Map();
 
 /** TradingView coin_analysis puts live price under price_data, not top-level. */
 export function extractPriceFromAnalysis(analysis) {
   if (!analysis || analysis.error) return null;
   const pd = analysis.price_data || {};
-  for (const candidate of [
-    pd.current_price,
-    pd.close,
-    analysis.price,
-    analysis.close,
-    analysis.indicators?.close,
-  ]) {
+  for (const candidate of [pd.current_price, pd.close, analysis.price, analysis.close]) {
     const n = Number(candidate);
     if (Number.isFinite(n) && n > 0) return n;
   }
@@ -24,80 +20,79 @@ export function extractPriceFromAnalysis(analysis) {
 
 export function extractPriceFromYahoo(quote) {
   if (!quote || quote.error) return null;
-  for (const candidate of [
-    quote.price,
-    quote.regularMarketPrice,
-    quote.last,
-    quote.close,
-  ]) {
+  for (const candidate of [quote.price, quote.regularMarketPrice, quote.last, quote.close]) {
     const n = Number(candidate);
     if (Number.isFinite(n) && n > 0) return n;
   }
   return null;
 }
 
-/** MCP may return RSI as number or { value, signal }. */
+/** MCP returns RSI as { value, signal, ... }; older shapes used a bare number. */
 export function extractRsi(source) {
   if (source == null) return null;
-  if (typeof source === "number" && Number.isFinite(source)) return source;
+  if (typeof source === "number") return Number.isFinite(source) ? source : null;
   if (typeof source === "object") {
     const n = Number(source.value ?? source.rsi);
-    if (Number.isFinite(n)) return n;
+    return Number.isFinite(n) ? n : null;
   }
   const n = Number(source);
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * coin_analysis for the configured symbol, cached briefly and de-duplicated so
+ * a screening cycle (SMC prefetch + MTF tool + management) doesn't hammer
+ * TradingView with identical requests.
+ */
+export async function fetchAnalysis(timeframe, { maxAgeMs = ANALYSIS_TTL_MS } = {}) {
+  const hit = analysisCache.get(timeframe);
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.promise;
+
+  const promise = callMcpTool("coin_analysis", {
+    symbol: config.market.dataSymbol,
+    exchange: config.market.dataExchange,
+    timeframe,
+  }).catch((error) => ({ error: error.message, timeframe }));
+  analysisCache.set(timeframe, { at: Date.now(), promise });
+
+  const result = await promise;
+  if (result?.error) analysisCache.delete(timeframe);
+  return result;
+}
+
 function biasFromAnalysis(analysis) {
-  if (!analysis || analysis.error) return { bias: "Unknown", score: 0 };
   const ms = analysis.market_sentiment || {};
-  const signal = String(ms.buy_sell_signal || ms.momentum || "").toLowerCase();
+  const signal = String(ms.buy_sell_signal || "").toLowerCase();
   let score = 0;
-  if (signal.includes("buy") || signal.includes("bull")) score = 1;
-  if (signal.includes("sell") || signal.includes("bear")) score = -1;
-  const rsi = extractRsi(analysis.indicators?.rsi ?? analysis.rsi);
-  if (typeof rsi === "number") {
+  if (signal.includes("buy")) score = 1;
+  if (signal.includes("sell")) score = -1;
+  const rsi = extractRsi(analysis.rsi);
+  if (rsi != null) {
     if (rsi > 55) score += 0.5;
     if (rsi < 45) score -= 0.5;
   }
   const bias = score > 0.5 ? "Bullish" : score < -0.5 ? "Bearish" : "Neutral";
-  return { bias, score: score > 0 ? 1 : score < 0 ? -1 : 0, rsi, signal: ms.buy_sell_signal || ms.momentum };
+  return { bias, score: score > 0.5 ? 1 : score < -0.5 ? -1 : 0, rsi, signal: ms.buy_sell_signal };
 }
 
 export async function getScalpIntradayMtf() {
   const mode = getActiveMode();
-  const tfs = (mode.timeframes || ["5m", "15m", "1h", "4h"]).filter((tf) => tf !== "1m");
+  const tfs = mode.timeframes || ["5m", "15m", "1h", "4h"];
   const tfResults = {};
 
-  await Promise.all(tfs.map(async (tf) => {
-    try {
-      const analysis = await callMcpTool("coin_analysis", {
-        symbol: config.market.dataSymbol,
-        exchange: config.market.dataExchange,
-        timeframe: tf,
-      });
-      if (analysis?.error) {
-        tfResults[tf] = { error: analysis.error };
-        return;
-      }
-      const { bias, score, rsi, signal } = biasFromAnalysis(analysis);
-      tfResults[tf] = {
-        label: `${tf} intraday`,
-        bias,
-        score,
-        rsi,
-        signal,
-        price: extractPriceFromAnalysis(analysis),
-      };
-    } catch (error) {
-      tfResults[tf] = { error: error.message };
+  // Sequential — parallel bursts trigger TradingView failure cooldowns.
+  for (const tf of tfs) {
+    const analysis = await fetchAnalysis(tf);
+    if (analysis?.error) {
+      tfResults[tf] = { error: analysis.error };
+      continue;
     }
-  }));
+    const { bias, score, rsi, signal } = biasFromAnalysis(analysis);
+    tfResults[tf] = { label: `${tf} intraday`, bias, score, rsi, signal, price: extractPriceFromAnalysis(analysis) };
+  }
 
-  const scores = Object.values(tfResults)
-    .map((t) => (t.error ? null : t.score))
-    .filter((s) => typeof s === "number");
-  const netScore = scores.reduce((a, b) => a + b, 0);
+  const valid = Object.entries(tfResults).filter(([, t]) => !t.error);
+  const netScore = valid.reduce((a, [, t]) => a + t.score, 0);
   let status = "MIXED/RANGING";
   let confidence = "Low";
   if (netScore >= 3) { status = "FULLY ALIGNED BULLISH"; confidence = "High"; }
@@ -105,21 +100,19 @@ export async function getScalpIntradayMtf() {
   else if (netScore >= 2) { status = "LEAN BULLISH"; confidence = "Medium"; }
   else if (netScore <= -2) { status = "LEAN BEARISH"; confidence = "Medium"; }
 
+  const dir = Math.sign(netScore);
+  const divergent = dir === 0 ? [] : valid.filter(([, t]) => t.score === -dir).map(([tf]) => tf);
+
   return {
-    symbol: config.market.dataSymbol,
-    exchange: config.market.dataExchange,
+    symbol: config.market.feedLabel,
     analysis_type: "Scalp Intraday MTF",
     timeframes: tfResults,
     alignment: {
       status,
       confidence,
       net_score: netScore,
-      scores_by_tf: Object.fromEntries(
-        Object.entries(tfResults).map(([tf, t]) => [tf, t.score ?? 0]),
-      ),
-    },
-    recommendation: {
-      action: netScore >= 2 ? "Scalp long bias — use 1m/5m trigger" : netScore <= -2 ? "Scalp short bias — use 1m/5m trigger" : "No scalp — wait for intraday alignment",
+      divergent_timeframes: divergent,
+      scores_by_tf: Object.fromEntries(Object.entries(tfResults).map(([tf, t]) => [tf, t.score ?? 0])),
     },
   };
 }
@@ -144,57 +137,47 @@ export async function getXauusdCombined(timeframe) {
   });
 }
 
-export async function getXauusdPrice() {
-  return callMcpTool("yahoo_price", {
-    symbol: config.market.yahooSymbol,
-  });
-}
-
-/** Management TP/SL — OANDA/TradingView first, Yahoo GC=F fallback. */
+/**
+ * Live price on the screening feed (TVC:GOLD). Yahoo GC=F is a FUTURES quote
+ * ($10–30 away from spot), so it is only used converted by a recently measured
+ * basis — never raw, or SL/TP would trigger on the wrong price.
+ */
 export async function getManagementPrice() {
   const errors = [];
 
   for (const tf of ["5m", "15m", "1h"]) {
-    try {
-      const analysis = await callMcpTool("coin_analysis", {
-        symbol: config.market.dataSymbol,
-        exchange: config.market.dataExchange,
-        timeframe: tf,
-      });
-      if (analysis?.error) {
-        errors.push(`oanda/${tf}: ${analysis.error}`);
-        continue;
-      }
-      const price = extractPriceFromAnalysis(analysis);
-      if (price != null) {
-        return {
-          price,
-          source: "oanda",
-          timeframe: tf,
-          symbol: `${config.market.dataExchange}:${config.market.dataSymbol}`,
-        };
-      }
-      errors.push(`oanda/${tf}: no price in response`);
-    } catch (error) {
-      errors.push(`oanda/${tf}: ${error.message}`);
+    const analysis = await fetchAnalysis(tf, { maxAgeMs: 10_000 });
+    if (analysis?.error) {
+      errors.push(`tv/${tf}: ${analysis.error}`);
+      continue;
     }
+    const price = extractPriceFromAnalysis(analysis);
+    if (price != null) {
+      return { price, source: "tradingview", timeframe: tf, symbol: config.market.feedLabel };
+    }
+    errors.push(`tv/${tf}: no price in response`);
   }
 
-  try {
-    const quote = await getXauusdPrice();
-    const price = extractPriceFromYahoo(quote);
-    if (price != null) {
-      return {
-        price,
-        source: "yahoo",
-        symbol: config.market.yahooSymbol,
-        warnings: errors,
-      };
+  const basis = getRecentBasis();
+  if (basis == null) {
+    errors.push("yahoo: no recent futures→spot basis, raw GC=F not comparable to spot levels");
+  } else {
+    try {
+      const quote = await callMcpTool("yahoo_price", { symbol: config.market.yahooSymbol });
+      const futures = extractPriceFromYahoo(quote);
+      if (futures != null) {
+        return {
+          price: Number((futures - basis).toFixed(config.broker.digits ?? 2)),
+          source: "yahoo_basis_adjusted",
+          symbol: config.market.yahooSymbol,
+          basis,
+          warnings: errors,
+        };
+      }
+      errors.push(`yahoo: ${quote?.error || "no price in response"}`);
+    } catch (error) {
+      errors.push(`yahoo: ${error.message}`);
     }
-    if (quote?.error) errors.push(`yahoo: ${quote.error}`);
-    else errors.push("yahoo: no price in response");
-  } catch (error) {
-    errors.push(`yahoo: ${error.message}`);
   }
 
   log("mgmt_warn", `All price sources failed: ${errors.join(" | ")}`);
@@ -202,83 +185,9 @@ export async function getManagementPrice() {
 }
 
 export async function getGoldNews(limit = 5) {
-  return callMcpTool("financial_news", {
-    symbol: "XAUUSD",
-    category: "all",
-    limit,
-  });
+  return callMcpTool("financial_news", { symbol: "XAUUSD", category: "all", limit });
 }
 
 export async function getMarketSnapshot() {
   return callMcpTool("market_snapshot", {});
-}
-
-export async function getCoinAnalysis(timeframe = "15m") {
-  return callMcpTool("coin_analysis", {
-    symbol: config.market.dataSymbol,
-    exchange: config.market.dataExchange,
-    timeframe,
-  });
-}
-
-/** HTF→LTF S/R zone stack for scalp entries (independent of SMC prefetch). */
-export async function getMtfZoneStack() {
-  if (config.mtfZones?.enabled === false) {
-    return { disabled: true, summary: "MTF zones disabled in config." };
-  }
-
-  const tfs = config.mtfZones?.timeframes ?? ["4h", "1h", "15m", "5m"];
-  const analyses = {};
-
-  await Promise.all(tfs.map(async (tf) => {
-    try {
-      analyses[tf] = await callMcpTool("coin_analysis", {
-        symbol: config.market.dataSymbol,
-        exchange: config.market.dataExchange,
-        timeframe: tf,
-      });
-    } catch (error) {
-      analyses[tf] = { error: error.message, timeframe: tf };
-    }
-  }));
-
-  let daily = null;
-  try {
-    daily = await callMcpTool("coin_analysis", {
-      symbol: config.market.dataSymbol,
-      exchange: config.market.dataExchange,
-      timeframe: "1D",
-    });
-    analyses["1D"] = daily;
-  } catch (error) {
-    analyses["1D"] = { error: error.message };
-  }
-
-  const price = extractPriceFromAnalysis(analyses["5m"])
-    ?? extractPriceFromAnalysis(analyses["15m"])
-    ?? extractPriceFromAnalysis(analyses["1h"]);
-
-  const pd = daily?.price_data || {};
-  const asian = getAsianRange();
-  const h4Struct = analyses["4h"]?.market_structure;
-  const h1Struct = analyses["1h"]?.market_structure;
-
-  const stack = buildMtfZoneStack({
-    analyses,
-    price,
-    extras: {
-      pdh: pd.high ?? null,
-      pdl: pd.low ?? null,
-      asian,
-    },
-    htf: {
-      h4_trend: h4Struct?.trend,
-      h1_trend: h1Struct?.trend,
-    },
-  });
-
-  return {
-    ...stack,
-    summary: formatMtfZonesForPrompt(stack),
-  };
 }

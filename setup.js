@@ -2,7 +2,6 @@
 import fs from "fs";
 import readline from "readline";
 import { repoPath } from "./repo-root.js";
-import { log } from "./logger.js";
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
@@ -10,6 +9,13 @@ function ask(q, def = "") {
   return new Promise((resolve) => {
     rl.question(def ? `${q} [${def}]: ` : `${q}: `, (a) => resolve(a.trim() || def));
   });
+}
+
+/** Set KEY=value in .env text: replaces an existing (even commented-out) line, else appends. */
+function setEnv(env, key, value) {
+  const line = `${key}=${value}`;
+  const re = new RegExp(`^#?\\s*${key}=.*$`, "m");
+  return re.test(env) ? env.replace(re, line) : `${env.trimEnd()}\n${line}\n`;
 }
 
 async function main() {
@@ -23,25 +29,31 @@ async function main() {
   }
 
   const config = JSON.parse(fs.readFileSync(repoPath("user-config.json"), "utf8"));
-  config.activeMode = await ask("Trading mode (scalp/day/swing)", "scalp");
+  let mode = await ask("Trading mode (scalp/day/swing)", config.activeMode || "scalp");
+  while (!["scalp", "day", "swing"].includes(mode)) mode = await ask("Mode must be scalp, day or swing", "scalp");
+  config.activeMode = mode;
   config.broker = config.broker || {};
-  config.broker.name = await ask("Broker name", "HFM");
-  config.broker.pipSize = Number(await ask("Pip size", "0.01"));
-  config.broker.priceOffset = Number(await ask("Price offset OANDA→broker", "0"));
-
+  config.broker.name = await ask("Broker name", config.broker.name || "HFM");
+  config.broker.pipSize = Number(await ask("Pip size (0.1 = 10 cents on 2-digit gold)", String(config.broker.pipSize ?? 0.1)));
+  config.broker.priceOffset = Number(await ask("Price offset feed→broker", String(config.broker.priceOffset ?? 0)));
   fs.writeFileSync(repoPath("user-config.json"), JSON.stringify(config, null, 2));
 
   let env = fs.readFileSync(repoPath(".env"), "utf8");
-  const apiKey = await ask("OpenRouter API key (or skip)", "");
-  if (apiKey) {
-    env = env.replace(/OPENROUTER_API_KEY=.*/, `OPENROUTER_API_KEY=${apiKey}`);
-  }
+  const baseUrl = await ask("LLM base URL (OpenAI-compatible)", "https://openrouter.ai/api/v1");
+  const apiKey = await ask("LLM API key (or skip)", "");
+  const model = await ask("LLM model id (or skip)", "");
+  env = setEnv(env, "LLM_BASE_URL", baseUrl);
+  if (apiKey) env = setEnv(env, "LLM_API_KEY", apiKey);
+  if (model) env = setEnv(env, "LLM_MODEL", model);
+
   const tg = await ask("Telegram bot token (or skip)", "");
-  if (tg) env = env.replace(/TELEGRAM_BOT_TOKEN=.*/, `TELEGRAM_BOT_TOKEN=${tg}`);
+  if (tg) env = setEnv(env, "TELEGRAM_BOT_TOKEN", tg);
+  const chat = await ask("Telegram chat ID (or skip)", "");
+  if (chat) env = setEnv(env, "TELEGRAM_CHAT_ID", chat);
   fs.writeFileSync(repoPath(".env"), env);
 
   rl.close();
-  log("setup", "Config written. Run: npm run mcp:install && npm run dev");
+  console.log("\nConfig written. Next: npm run mcp:install && npm run dev");
 }
 
 main().catch((e) => {

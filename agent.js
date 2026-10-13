@@ -10,21 +10,24 @@ const SCREENER_TOOLS = new Set([
   "get_smc_context", "get_mtf_zones", "get_xauusd_mtf", "get_xauusd_combined", "get_xauusd_price", "get_gold_news",
   "get_market_context", "propose_setup",
 ]);
-const MANAGER_TOOLS = new Set(["get_xauusd_price", "get_active_setups", "get_xauusd_combined"]);
-const GENERAL_TOOLS = new Set(tools.map((t) => t.function.name));
 
 function getToolsForRole(agentType) {
-  const allowed = agentType === "SCREENER" ? SCREENER_TOOLS
-    : agentType === "MANAGER" ? MANAGER_TOOLS
-    : GENERAL_TOOLS;
-  return tools.filter((t) => allowed.has(t.function.name));
+  return agentType === "SCREENER" ? tools.filter((t) => SCREENER_TOOLS.has(t.function.name)) : tools;
 }
 
-const client = new OpenAI({
-  baseURL: process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1",
-  apiKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY,
-  timeout: 5 * 60 * 1000,
-});
+let client = null;
+
+function getClient() {
+  if (client) return client;
+  const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("No LLM API key — set LLM_API_KEY (or OPENROUTER_API_KEY) in .env");
+  client = new OpenAI({
+    baseURL: process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1",
+    apiKey,
+    timeout: 5 * 60 * 1000,
+  });
+  return client;
+}
 
 const ONCE_PER_SESSION = new Set(["propose_setup"]);
 
@@ -37,7 +40,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, agentType 
   ];
 
   const firedOnce = new Set();
-  const usedModel = model || (agentType === "SCREENER" ? config.llm.screeningModel : agentType === "MANAGER" ? config.llm.managementModel : config.llm.generalModel);
+  const usedModel = model || (agentType === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel);
 
   for (let step = 0; step < maxSteps; step++) {
     if (step === 0) {
@@ -46,7 +49,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, agentType 
     log("agent", `Step ${step + 1}/${maxSteps} [${agentType}]`);
 
     const toolChoice = step === 0 && agentType === "SCREENER" ? "required" : "auto";
-    const response = await client.chat.completions.create({
+    const response = await getClient().chat.completions.create({
       model: usedModel,
       messages,
       tools: getToolsForRole(agentType),
@@ -55,7 +58,8 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, agentType 
       max_tokens: config.llm.maxTokens,
     });
 
-    const msg = response.choices[0].message;
+    const msg = response.choices?.[0]?.message;
+    if (!msg) throw new Error(`LLM returned no choices: ${JSON.stringify(response).slice(0, 300)}`);
     if (msg.tool_calls) {
       for (const tc of msg.tool_calls) {
         if (tc.function?.arguments) {
@@ -86,18 +90,23 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, agentType 
         args = {};
       }
 
-      if (ONCE_PER_SESSION.has(name) && firedOnce.has(name)) {
-        return {
-          role: "tool",
-          tool_call_id: tc.id,
-          content: JSON.stringify({ blocked: true, reason: `${name} already called this session` }),
-        };
+      if (ONCE_PER_SESSION.has(name)) {
+        // Marked before awaiting — parallel tool calls in one message must not both run.
+        if (firedOnce.has(name)) {
+          return {
+            role: "tool",
+            tool_call_id: tc.id,
+            content: JSON.stringify({ blocked: true, reason: `${name} already succeeded or is running this session` }),
+          };
+        }
+        firedOnce.add(name);
       }
 
       await onToolStart?.({ name, args, step });
       const result = await executeTool(name, args);
       await onToolFinish?.({ name, args, result, step });
-      if (ONCE_PER_SESSION.has(name)) firedOnce.add(name);
+      // A gate rejection tells the model how to fix the setup — let it retry.
+      if (ONCE_PER_SESSION.has(name) && !result?.success) firedOnce.delete(name);
 
       return {
         role: "tool",

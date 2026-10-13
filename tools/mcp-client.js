@@ -1,4 +1,3 @@
-import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -7,17 +6,20 @@ import { REPO_ROOT } from "../repo-root.js";
 import { log } from "../logger.js";
 
 const MCP_BIN = path.join(REPO_ROOT, "mcp", ".venv", "bin", "tradingview-mcp");
+const SECRET_ENV = ["LLM_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN"];
 
 let client = null;
 let transport = null;
 let connectPromise = null;
 
-export function getMcpBinPath() {
-  return MCP_BIN;
-}
-
 export function mcpBinaryExists() {
   return fs.existsSync(MCP_BIN);
+}
+
+function resetConnection() {
+  client = null;
+  transport = null;
+  connectPromise = null;
 }
 
 async function connectMcp() {
@@ -29,17 +31,25 @@ async function connectMcp() {
       throw new Error(`TradingView MCP not installed. Run: npm run mcp:install (${MCP_BIN})`);
     }
 
-    transport = new StdioClientTransport({
-      command: MCP_BIN,
-      args: [],
-      env: {
-        ...process.env,
-        MARKETAUX_API_TOKEN: process.env.MARKETAUX_API_TOKEN || "",
-      },
+    const env = { ...process.env, MARKETAUX_API_TOKEN: process.env.MARKETAUX_API_TOKEN || "" };
+    for (const key of SECRET_ENV) delete env[key];
+
+    transport = new StdioClientTransport({ command: MCP_BIN, args: [], env, stderr: "pipe" });
+    // Server logs every request to stderr — surface only real failures.
+    transport.stderr?.on("data", (chunk) => {
+      for (const line of String(chunk).split("\n")) {
+        if (/error|traceback|exception/i.test(line)) log("mcp_stderr", line.trim().slice(0, 300));
+      }
     });
 
-    client = new Client({ name: "shaolin", version: "0.1.0" }, { capabilities: {} });
-    await client.connect(transport);
+    const c = new Client({ name: "shaolin", version: "0.1.0" }, { capabilities: {} });
+    c.onclose = () => {
+      if (client !== c) return; // closed intentionally via closeMcp()
+      log("mcp_warn", "TradingView MCP connection closed — will reconnect on next call");
+      resetConnection();
+    };
+    await c.connect(transport);
+    client = c;
     log("mcp", "TradingView MCP connected");
     return client;
   })();
@@ -47,55 +57,46 @@ async function connectMcp() {
   try {
     return await connectPromise;
   } catch (error) {
-    connectPromise = null;
-    client = null;
+    resetConnection();
     throw error;
   }
 }
 
-export async function callMcpTool(name, args = {}, timeoutMs = 120000) {
-  await connectMcp();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const result = await client.callTool({ name, arguments: args }, undefined, { signal: controller.signal });
-    clearTimeout(timer);
-
-    const text = (result.content || [])
-      .filter((part) => part.type === "text")
-      .map((part) => part.text)
-      .join("\n");
-
-    if (text) {
-      try {
-        return JSON.parse(text);
-      } catch {
-        return { raw: text, isError: result.isError };
-      }
-    }
-
-    if (result.structuredContent) return result.structuredContent;
-    return { success: !result.isError, content: result.content };
-  } catch (error) {
-    clearTimeout(timer);
-    if (error.name === "AbortError") throw new Error(`MCP tool ${name} timed out after ${timeoutMs}ms`);
-    throw error;
+/** MCP tools return errors as { error: { code, message } } — flatten to a string. */
+function normalizeError(result) {
+  if (result && typeof result === "object" && result.error && typeof result.error === "object") {
+    return { ...result, error: result.error.message || JSON.stringify(result.error), error_code: result.error.code };
   }
+  return result;
+}
+
+export async function callMcpTool(name, args = {}, timeoutMs = 120000) {
+  const c = await connectMcp();
+  // SDK default request timeout is 60s — must be passed explicitly for slow tools.
+  const result = await c.callTool({ name, arguments: args }, undefined, { timeout: timeoutMs });
+
+  const text = (result.content || [])
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n");
+
+  if (text) {
+    try {
+      return normalizeError(JSON.parse(text));
+    } catch {
+      return result.isError ? { error: text.slice(0, 500) } : { raw: text };
+    }
+  }
+
+  if (result.structuredContent) return normalizeError(result.structuredContent);
+  return { success: !result.isError, content: result.content };
 }
 
 export async function closeMcp() {
   if (transport) {
-    await transport.close();
-    transport = null;
-    client = null;
-    connectPromise = null;
+    const t = transport;
+    resetConnection();
+    await t.close();
     log("mcp", "TradingView MCP disconnected");
   }
-}
-
-export async function listMcpTools() {
-  await connectMcp();
-  const { tools } = await client.listTools();
-  return tools;
 }

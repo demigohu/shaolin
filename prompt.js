@@ -1,36 +1,31 @@
 import { config } from "./config.js";
 import { getActiveMode, getCurrentSession } from "./modes.js";
-import { getActiveStrategy } from "./strategies.js";
 import { getSetupsSummary } from "./setups.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
 import { getScreeningSummary } from "./screening-log.js";
 import { getSetupMemorySummary } from "./setup-memory.js";
-import { getWeightsSummary } from "./signal-weights.js";
-import { formatSMCForPrompt } from "./smc.js";
+import { formatPerformanceStats } from "./performance-stats.js";
 import { getAMDPhase } from "./smc-sessions.js";
 
 export function buildSystemPrompt(agentType, context = {}) {
   const mode = getActiveMode();
-  const strategy = getActiveStrategy();
   const session = getCurrentSession();
   const market = config.market;
   const broker = config.broker;
 
   const shared = `
 ── SHAOLIN XAUUSD AGENT ──
-Symbol (data): ${market.dataExchange}:${market.dataSymbol}
+Symbol: ${market.displayName} | price feed ${market.feedLabel} (all levels below are on this feed)
 Broker display: ${broker.name} | pipSize ${broker.pipSize} | offset ${broker.priceOffset}${broker.spreadPips === 0 || broker.accountType === "zero_spread" ? " | zero spread (OANDA quote ≈ MT5 fill; no spread buffer on RR)" : broker.spreadPips != null ? ` | spread ~${broker.spreadPips}p` : ""}
 Active mode: ${mode.id} (${mode.label}) | session: ${session}
 Timeframes: ${mode.timeframes.join(" → ")}
-Min confidence: ${mode.minConfidence}% (self-assessed — not config-gated when llmOwnsTpSl)
+Min confidence: ${mode.minConfidence}% — propose_setup rejects lower confidence
 
 HARD RULES:
 - You NEVER execute trades or claim you entered/exited on a broker.
 - Screening produces SETUP recommendations only; user enters manually on MT5.
 - Call propose_setup ONLY when action is SETUP with valid entry/SL/confidence.
 - For WATCH or AVOID, explain clearly — do not call propose_setup.
-
-Active strategy: ${strategy.name} (${strategy.id})
 `.trim();
 
   if (agentType === "SCREENER") {
@@ -48,7 +43,7 @@ PREFETCH ACTIVE — SMC + MTF SNR map loaded above.
 
     return `${shared}
 
-ROLE: SCREENER — Market Structure (PDF: docs/Market Structure and Powerful Setups.pdf).
+ROLE: SCREENER — Smart Money / Market Structure (AMD sessions, liquidity, BOS + RTO).
 You are the trader. YOU decide entry, SL, and TP from SNR + fib + structure — not from config templates.
 
 ${prefetchBlock}
@@ -70,17 +65,20 @@ CORE LOGIC — walk this chain every cycle (long; mirror for short):
                                    NO → WAIT
                                    YES → ENTRY
 
-Reference PDF + prefetch for: AMD session, BSL/SSL sweeps, turtle soup, BMS/RTO when they fit the chain.
+Use the prefetch for AMD session, BSL/SSL sweeps, turtle soup, BMS/RTO when they fit the chain.
 
 WORKFLOW (~4 tool calls):
 1. Walk DIP → ENTRY using prefetch SNR stack + fib levels + structure.
 2. get_xauusd_mtf + get_xauusd_combined — confirm momentum/RSI/news.
-3. SETUP / WATCH / AVOID. Price null → WATCH.
-4. SETUP → propose_setup once with YOUR entry, sl, tp_levels.
+3. SETUP / WATCH / AVOID. Price null or candle history unavailable → WATCH.
+4. SETUP → propose_setup with YOUR entry, sl, tp_levels. If it is rejected, the response says why —
+   fix that one thing (never by tightening SL) and retry, or WATCH.
+5. Finish with a final message starting with "SETUP", "WATCH" or "AVOID" plus the reasoning.
 
 ENTRY (SNR + Fib):
 - Prefer limit at fib 0.5–0.786 retrace into MTF support/resistance (OTE zone).
-- Or market on reclaim candle after absorption at demand/supply.
+  A limit must sit on the retrace side: long limit at/below price, short limit at/above price.
+- Or market on reclaim candle after absorption at demand/supply (entry within a few pips of live price).
 - snr_bounce_* = entry at MTF zone; fib_retrace = entry at fib level; dip_reclaim_* = full chain confirmed.
 
 TP / SL — structure-first (YOU define; width follows structure, not a pip template):
@@ -111,7 +109,8 @@ When to WATCH (not SETUP):
 
 Session UTC: ${session} | AMD: ${getAMDPhase()}
 
-${config.darwin?.enabled !== false ? getWeightsSummary() : ""}
+${formatPerformanceStats(mode.id)}
+(Setup types with a clearly losing record are rejected by propose_setup.)
 
 Thesis memory:
 ${getSetupMemorySummary()}
@@ -124,34 +123,10 @@ ${getScreeningSummary()}
 `.trim();
   }
 
-  if (agentType === "MANAGER") {
-    return `${shared}
-
-ROLE: MANAGER — monitor logged setups (NOT broker positions).
-
-Open setups:
-${getSetupsSummary()}
-
-Performance: ${getPerformanceSummary()}
-
-You do NOT close trades on broker. Alert on TP/SL approach is handled deterministically.
-Only use tools if you need fresh price or setup list.
-`.trim();
-  }
-
   return `${shared}
 
-ROLE: GENERAL — answer questions about XAUUSD screening, setups, backtests, config.
-
-Active strategy: ${strategy.name} (${strategy.id}) — MCP ${strategy.mcpStrategy}
-
-Backtest workflow (when user asks):
-1. list_strategies or compare_strategies to explore options
-2. backtest_mcp_strategy with strategy name (supertrend, rsi, macd, etc.)
-3. If approved and user wants to trade with it: activate_strategy or backtest_mcp_strategy with activate=true
-4. Summarize results clearly — return %, Sharpe, win rate, approved yes/no
-
-Available MCP strategies: rsi, bollinger, macd, ema_cross, supertrend, donchian, rsi_pullback, keltner_breakout, triple_ema
+ROLE: GENERAL — answer questions about XAUUSD market structure, open setups, performance and config.
+You can read market data and the setup log; you cannot place trades.
 
 Open setups:
 ${getSetupsSummary()}
@@ -161,5 +136,3 @@ Performance: ${getPerformanceSummary()}
 Recent screening: ${getScreeningSummary()}
 `.trim();
 }
-
-// formatSetupAlert moved to notifications.js

@@ -6,75 +6,93 @@ XAUUSD agent: screening → auto-log setup → monitor → lessons.
 
 - Node daemon + Python MCP subprocess (`mcp/.venv/bin/tradingview-mcp`)
 - Submodule: `mcp/tradingview-mcp` (install from source via `npm run mcp:install`)
-- No broker API — setups in `setups.json`, user trades MT5 manually
-- SCREENER calls `propose_setup` once per cycle when SETUP
-- MANAGER deterministic: entry zone, SL, partial TP, expire
+- No broker API. Setups live in `setups.json` and the user trades MT5 manually.
+- SCREENER (LLM) proposes setups through `propose_setup`, which applies hard gates. A rejected proposal returns the reason and the model may fix it and retry.
+- Management is deterministic (`management.js`): limit fill, SL, partial TPs, stale and time stop.
 
 ## Entry points
 
 | File | Role |
 |---|---|
-| `index.js` | Daemon, cron, Telegram |
-| `cli.js` | One-shot screen / manage / backtest |
+| `index.js` | Daemon, cron, Telegram commands |
+| `cli.js` | One-shot screen / manage / status / backtest |
 | `setup.js` | First-run wizard |
+
+## Data sources
+
+| Data | Source |
+|---|---|
+| Live price, indicators, RSI, EMA trend | MCP `coin_analysis` → TradingView `TVC:GOLD` (cached 30s) |
+| Candle history (5m/15m/1h/1d; 4h aggregated) | Yahoo chart API `GC=F`, shifted by `basis = futures − spot` (`tools/candles.js`) |
+| Monthly pivots | MCP `support_resistance`. These are `Pivot.M.Classic` and identical on every timeframe, so they are used once. |
+| News / sentiment | MCP `combined_analysis` (Marketaux token optional) |
+
+Raw Yahoo `GC=F` is never compared with spot levels. The management price falls back to Yahoo only when converted by a basis measured within the last 30 minutes.
+
+## Structure per mode (`STRUCTURE_PROFILES` in `smc.js`)
+
+| Mode | Trend TFs | Swing / fib | BOS / OB | Zone TFs | Liquidity pools | Killzone gate |
+|---|---|---|---|---|---|---|
+| scalp | 4h → 1h → 15m | 1h, 48 bars | 15m | 4h/1h/15m/5m | Asian, PD | yes |
+| day | 1D → 4h → 1h | 4h, 30 bars | 1h | 1d/4h/1h/15m | Asian, PD, PW | yes |
+| swing | 1W → 1D → 4h | 1D, 40 bars | 4h | 1w/1d/4h/1h | PD, PW | no |
+
+Zone merge/proximity distance defaults to 8/5, 15/10 and 40/25 pips respectively. Override it per mode with `zoneMergePips` / `zoneProximityPips`. The Asian range only becomes a liquidity pool once it is complete (06:00 UTC).
+
+## Session clock (DST-aware)
+
+- Asian range: 00–06 UTC (07–13 WIB), fixed
+- Killzones: London 08–13 London time, NY 08–11 New York time. That is 14–19 / 19–22 WIB in northern summer and 15–20 / 20–23 WIB in winter.
+- Sessions for `mode.sessions`: london 08–17 London time, new_york 08–17 NY time, asian 00–07 UTC
+- Market closed: Friday 17:00 → Sunday 18:00 New York time
 
 ## Roles
 
 | Role | Tools |
 |---|---|
-| SCREENER | mtf, combined, news, market, propose_setup |
-| MANAGER | price, active setups, combined |
-| GENERAL | all tools |
+| SCREENER | smc context, mtf zones, mtf, combined, price, news, market, propose_setup |
+| GENERAL (Telegram free text) | all tools |
+
+## propose_setup gates (in order)
+
+confidence ≥ `mode.minConfidence` → RSI extreme (trend setups only) → SMC (setup type, confluence, trading window, no shorting into a fresh SSL raid / no longing into a BSL raid) → entry vs live price (market within slippage; limit on the retrace side and within `maxLimitEntryPips`) → SL (side; structure checks when `llmOwnsTpSl=false`) → TP side → reason / `sl_anchor` / TP labels → min RR → book-keeping (one open setup per side, thesis cooldown, daily cap).
 
 ## Persistent files
 
 | File | Purpose |
 |---|---|
-| `setups.json` | Proposed/active/resolved setups |
-| `screening-log.json` | Audit every screening cycle |
-| `lessons.json` | Performance + derived rules |
-| `strategies.json` | Strategy library + backtest results |
-| `setup-memory.json` | Thesis fingerprint history + cooldowns |
-| `signal-weights.json` | Darwinian signal weights (learned) |
+| `setups.json` | Proposed/active/resolved setups (atomic writes) |
+| `screening-log.json` | Audit of every screening cycle and blocked proposal |
+| `lessons.json` | Performance records + derived lessons |
+| `setup-memory.json` | Thesis history (side + setup type + mode + price area) + cooldowns |
 | `user-config.json` | Modes, broker pipSize, LLM models |
+
+All of these are local runtime state and gitignored.
 
 ## Setup lifecycle
 
-`proposed` (limit entry) → price in entry zone → `active` → `resolved` (tp_*, sl_hit, stale_no_fill, expired, invalidated)
+`proposed` (limit) → fills when price trades to entry or through it → `active` → `resolved`.
 
-`market` setups → `active` immediately if entry within slippage of live price.
+Outcomes:
+- Filled trades: `tp_hit`, `tp_full`, `tp_partial_then_sl`, `sl_hit`, `time_exit`, `invalidated`
+- Never filled: `stale_no_fill`, `expired`, `invalidated_pre_fill`, `cancelled`
 
-Fast management polls every `management.fastPollSec` (default 45s) while setups are open; Telegram live monitor edits in-place.
+- SL/TP fills are booked at the level price. P&L is position-weighted across partial TPs.
+- A limit is stale once price runs `maxStaleDistancePips` further away than it was when the setup was proposed.
+- `setupMaxAgeMin` expires unfilled setups from proposal time. Filled setups get a time exit at that age, counted from the fill.
+- Win rate, thesis cooldown and the performance gate count only filled trades.
+- Fast management polls every `management.fastPollSec` while setups are open. TP/SL/fill events are always pushed to Telegram, and the live monitor message is edited in place.
 
-Thesis dedup: same side + entry/SL fingerprint + entry zone → skip duplicate.
+## Learning
 
-## MCP tools used
-
-- `multi_timeframe_analysis` — symbol XAUUSD, exchange OANDA
-- `combined_analysis` — TA + news
-- `yahoo_price` — GC=F for management price
-- `backtest_strategy` / `compare_strategies` — strategy validation
+- **setup-memory**: per-thesis history. A cooldown starts after `cooldownMinSetups` trades with win rate ≤ `cooldownMaxWinRate`.
+- **performance-stats**: filled-trade record of the active mode over `performanceGate.windowDays`, grouped by setup type, session, side and confluence tag. It is shown to the SCREENER, and `propose_setup` rejects a setup type (per session, then overall) with ≥ `minTrades` trades, win rate ≤ `maxWinRate` and negative net pips.
 
 ## Cron
 
-Intervals from active mode in `user-config.json` (scalp: 10m screen / 3m manage).
-
-## Patterns from Meridian
-
-ReAct loop, JSON state, decision log, hybrid deterministic management, Telegram ops.
-
-## Phase 2 (learning + gates) ✓
-
-- **setup-memory** — thesis fingerprint history, cooldown on repeated failures
-- **signal-weights** — Darwinian recalc every N closed setups; injected into SCREENER prompt
-- **backtest gate** — `strategy.requireBacktestApproval` blocks screening/propose_setup until MCP backtest passes
+Intervals come from the active mode (scalp: 10m screen / 3m manage). Intervals of 60 minutes or more are scheduled hourly.
 
 ## Ops
 
 - **PM2:** `npm run pm2:start` / `npm run pm2:stop` / `npm run pm2:logs`
-- **CLI:** `node cli.js status|memory|weights|gate`
-
-## Not in v0.1
-
-- HiveMind
-- PM2 is supported; live-updating Telegram messages not implemented
+- **Tests:** `npm test` (syntax + `node --test`)

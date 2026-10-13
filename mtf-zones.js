@@ -1,63 +1,47 @@
 /**
  * Multi-timeframe support/resistance zone stack (HTF → LTF).
- * Merges pivot S/R per TF with PDH/PDL/Asian levels; scores confluence at price.
+ * Fractal swing highs/lows per TF + PDH/PDL, prior week, Asian range and the
+ * monthly pivots, merged into weighted clusters around price.
  */
 
 import { config } from "./config.js";
 import { toPips } from "./tools/price.js";
-import { extractPriceFromAnalysis } from "./tools/market.js";
+import { findFractals } from "./smc-analysis.js";
 
-const TF_WEIGHT = { "1D": 5, "4h": 4, "1h": 3, "15m": 2, "5m": 1 };
-const DEFAULT_TFS = ["4h", "1h", "15m", "5m"];
+const TF_WEIGHT = { "1w": 6, "1d": 5, "4h": 4, "1h": 3, "15m": 2, "5m": 1 };
+const TF_LOOKBACK = { "1w": 52, "1d": 90, "4h": 60, "1h": 72, "15m": 96, "5m": 72 };
+export const CANDLE_KEY = { "1w": "w1", "1d": "d1", "4h": "h4", "1h": "h1", "15m": "m15", "5m": "m5" };
 
-export function extractLevelsFromAnalysis(analysis, tf) {
-  if (!analysis || analysis.error) return [];
+export function extractSwingLevels(candles, tf) {
   const weight = TF_WEIGHT[tf] ?? 1;
-  const levels = [];
-  const sr = analysis.support_resistance || {};
-
-  for (const [key, val] of Object.entries(sr)) {
-    if (key.includes("distance") || key.endsWith("_pct")) continue;
-    const price = Number(val);
-    if (!Number.isFinite(price) || price <= 0) continue;
-    let kind = "level";
-    if (key.includes("resist") || /^r\d/.test(key)) kind = "resistance";
-    else if (key.includes("support") || /^s\d/.test(key)) kind = "support";
-    else if (key === "pivot") kind = "pivot";
-    levels.push({ price, kind, label: `${tf}:${key}`, tf, weight, source: "pivot" });
-  }
-
-  const pd = analysis.price_data || {};
-  const high = Number(pd.high);
-  const low = Number(pd.low);
-  if (Number.isFinite(high) && high > 0) {
-    levels.push({ price: high, kind: "resistance", label: `${tf}:bar_high`, tf, weight, source: "bar" });
-  }
-  if (Number.isFinite(low) && low > 0) {
-    levels.push({ price: low, kind: "support", label: `${tf}:bar_low`, tf, weight, source: "bar" });
-  }
-  return levels;
+  const { highs, lows } = findFractals((candles || []).slice(-(TF_LOOKBACK[tf] ?? 60)));
+  return [
+    ...highs.slice(-6).map((f) => ({ price: f.price, kind: "resistance", label: `${tf}:swing_high`, tf, weight, source: "swing" })),
+    ...lows.slice(-6).map((f) => ({ price: f.price, kind: "support", label: `${tf}:swing_low`, tf, weight, source: "swing" })),
+  ];
 }
 
-export function extractExtraLevels(extras, price = null) {
+/** Monthly classic pivots — identical on every TradingView TF, so taken once. */
+export function extractPivotLevels(sr) {
+  if (!sr) return [];
+  const map = { pivot: "pivot", resistance_1: "resistance", resistance_2: "resistance", support_1: "support", support_2: "support" };
+  return Object.entries(map)
+    .filter(([key]) => Number.isFinite(Number(sr[key])) && Number(sr[key]) > 0)
+    .map(([key, kind]) => ({ price: Number(sr[key]), kind, label: `monthly:${key}`, tf: "1M", weight: 3, source: "pivot" }));
+}
+
+export function extractExtraLevels(extras) {
   const levels = [];
-  const { pdh, pdl, asian } = extras || {};
-  if (Number.isFinite(pdh) && pdh > 0) {
-    const kind = price != null && price >= pdh ? "support" : "resistance";
-    levels.push({ price: pdh, kind, label: "PDH", tf: "1D", weight: 5, source: "session" });
-  }
-  if (Number.isFinite(pdl) && pdl > 0) {
-    const kind = price != null && price <= pdl ? "resistance" : "support";
-    levels.push({ price: pdl, kind, label: "PDL", tf: "1D", weight: 5, source: "session" });
-  }
-  if (asian?.high) {
-    const kind = price != null && price >= asian.high ? "support" : "resistance";
-    levels.push({ price: asian.high, kind, label: "Asian high", tf: "session", weight: 4, source: "asian" });
-  }
-  if (asian?.low) {
-    const kind = price != null && price < asian.low ? "resistance" : "support";
-    levels.push({ price: asian.low, kind, label: "Asian low", tf: "session", weight: 4, source: "asian" });
-  }
+  const add = (price, kind, label, weight, source) => {
+    if (Number.isFinite(price) && price > 0) levels.push({ price, kind, label, tf: source === "asian" ? "session" : "1D", weight, source });
+  };
+  const { pdh, pdl, pwh, pwl, asian } = extras || {};
+  add(pdh, "resistance", "PDH", 5, "session");
+  add(pdl, "support", "PDL", 5, "session");
+  add(pwh, "resistance", "PWH", 5, "session");
+  add(pwl, "support", "PWL", 5, "session");
+  add(asian?.high, "resistance", "Asian high", 4, "asian");
+  add(asian?.low, "support", "Asian low", 4, "asian");
   return levels;
 }
 
@@ -65,175 +49,100 @@ export function mergeZoneLevels(rawLevels, mergePips) {
   const pip = config.broker.pipSize || 0.1;
   const mergeDist = mergePips * pip;
   const sorted = [...rawLevels].sort((a, b) => a.price - b.price);
-  const used = new Array(sorted.length).fill(false);
   const clusters = [];
 
-  for (let i = 0; i < sorted.length; i++) {
-    if (used[i]) continue;
-    const cluster = [sorted[i]];
-    used[i] = true;
-    for (let j = i + 1; j < sorted.length; j++) {
-      if (used[j]) continue;
-      if (sorted[j].price - sorted[i].price > mergeDist) break;
-      const sameKind = sorted[j].kind === sorted[i].kind
-        || sorted[i].kind === "pivot"
-        || sorted[j].kind === "pivot";
-      if (Math.abs(sorted[j].price - sorted[i].price) <= mergeDist && sameKind) {
-        cluster.push(sorted[j]);
-        used[j] = true;
-      }
-    }
-    const totalW = cluster.reduce((s, l) => s + l.weight, 0);
-    const avgPrice = cluster.reduce((s, l) => s + l.price * l.weight, 0) / totalW;
-    const kind = cluster.some((l) => l.kind === "resistance") && !cluster.some((l) => l.kind === "support")
-      ? "resistance"
-      : cluster.some((l) => l.kind === "support") && !cluster.some((l) => l.kind === "resistance")
-        ? "support"
-        : cluster[0].kind;
-    clusters.push({
+  for (const level of sorted) {
+    const cur = clusters.at(-1);
+    if (cur && level.price - cur.members[0].price <= mergeDist) cur.members.push(level);
+    else clusters.push({ members: [level] });
+  }
+
+  return clusters.map(({ members }) => {
+    const totalW = members.reduce((s, l) => s + l.weight, 0);
+    const avgPrice = members.reduce((s, l) => s + l.price * l.weight, 0) / totalW;
+    const kinds = new Set(members.map((l) => l.kind));
+    const kind = kinds.size === 1 ? members[0].kind : "flip";
+    return {
       price: Number(avgPrice.toFixed(config.broker.digits ?? 2)),
       kind,
       strength: totalW,
-      labels: cluster.map((l) => l.label),
-      timeframes: [...new Set(cluster.map((l) => l.tf))],
-      sources: [...new Set(cluster.map((l) => l.source))],
-      confluence_tfs: new Set(cluster.map((l) => l.tf)).size,
-    });
-  }
-  return clusters;
+      labels: members.map((l) => l.label),
+      timeframes: [...new Set(members.map((l) => l.tf))],
+      sources: [...new Set(members.map((l) => l.source))],
+      confluence_tfs: new Set(members.map((l) => l.tf)).size,
+    };
+  });
 }
 
 export function classifyZonesAtPrice(price, zones, proximityPips) {
   if (price == null) {
-    return {
-      supports: [],
-      resistances: [],
-      nearestSupport: null,
-      nearestResistance: null,
-      atSupport: false,
-      atResistance: false,
-    };
+    return { supports: [], resistances: [], nearestSupport: null, nearestResistance: null, atSupport: false, atResistance: false };
   }
 
   const pip = config.broker.pipSize || 0.1;
   const prox = proximityPips * pip;
 
-  // Position relative to live price — broken levels flip role (resistance below price → support context).
+  // Role follows position vs live price — a broken resistance below price acts as support.
   const below = zones.filter((z) => z.price <= price).sort((a, b) => b.price - a.price);
-  const above = zones.filter((z) => z.price >= price).sort((a, b) => a.price - b.price);
+  const above = zones.filter((z) => z.price > price).sort((a, b) => a.price - b.price);
 
   const nearestSupport = below[0] || null;
   const nearestResistance = above[0] || null;
-
-  const atSupport = nearestSupport != null && Math.abs(price - nearestSupport.price) <= prox;
-  const atResistance = nearestResistance != null && Math.abs(price - nearestResistance.price) <= prox;
 
   return {
     supports: below.slice(0, 6),
     resistances: above.slice(0, 6),
     nearestSupport,
     nearestResistance,
-    atSupport,
-    atResistance,
+    atSupport: nearestSupport != null && price - nearestSupport.price <= prox,
+    atResistance: nearestResistance != null && nearestResistance.price - price <= prox,
   };
 }
 
-export function inferHtfBias(htf) {
-  const h4 = String(htf?.h4_trend || "").toLowerCase();
-  const h1 = String(htf?.h1_trend || "").toLowerCase();
-  if (h4.includes("bull") && h1.includes("bull")) return "bullish";
-  if (h4.includes("bear") && h1.includes("bear")) return "bearish";
-  if (h4.includes("bull") || h1.includes("bull")) return "lean_bull";
-  if (h4.includes("bear") || h1.includes("bear")) return "lean_bear";
+/** Bias from the two highest-timeframe trend labels. */
+export function inferHtfBias(trends = []) {
+  const [a, b] = trends.map((t) => String(t || "").toLowerCase());
+  if (a?.includes("bull") && b?.includes("bull")) return "bullish";
+  if (a?.includes("bear") && b?.includes("bear")) return "bearish";
+  if (a?.includes("bull") || b?.includes("bull")) return "lean_bull";
+  if (a?.includes("bear") || b?.includes("bear")) return "lean_bear";
   return "neutral";
 }
 
-export function describeZoneContext({
-  price,
-  atSupport,
-  atResistance,
-  nearestSupport,
-  nearestResistance,
-  proximityPips,
+export function buildMtfZoneStack({
+  candles = null,
+  pivots = null,
+  price = null,
+  extras = {},
+  htfTrends = [],
+  timeframes = ["4h", "1h", "15m", "5m"],
+  mergePips = 8,
+  proximityPips = 5,
 }) {
-  const notes = [];
+  const minStrength = config.mtfZones?.minZoneStrength ?? 0;
 
-  if (nearestSupport && price != null) {
-    const distP = toPips(price - nearestSupport.price);
-    notes.push(
-      `Support ${nearestSupport.price} (${distP}p ${distP >= 0 ? "below" : "above"} price) str=${nearestSupport.strength} [${nearestSupport.timeframes.join(",")}]${atSupport ? " — price in zone" : ""}`,
-    );
-  }
-  if (nearestResistance && price != null) {
-    const distP = toPips(nearestResistance.price - price);
-    notes.push(
-      `Resistance ${nearestResistance.price} (${distP}p above price) str=${nearestResistance.strength} [${nearestResistance.timeframes.join(",")}]${atResistance ? " — price in zone" : ""}`,
-    );
-  }
-
-  if (nearestSupport && nearestResistance && price != null) {
-    const rangePips = toPips(nearestResistance.price - nearestSupport.price);
-    if (rangePips > 0) {
-      notes.push(`Range between nearest S/R: ~${rangePips}p (reference for setup area — you decide side/type)`);
+  const raw = [];
+  if (candles) {
+    for (const tf of timeframes) {
+      const key = CANDLE_KEY[tf];
+      if (key && candles[key]) raw.push(...extractSwingLevels(candles[key], tf));
     }
   }
+  raw.push(...extractPivotLevels(pivots));
+  raw.push(...extractExtraLevels(extras));
 
-  return { notes, proximity_pips: proximityPips };
-}
-
-export function buildMtfZoneStack({ analyses = {}, price = null, extras = {}, htf = {} }) {
-  const cfg = config.mtfZones || {};
-  const mergePips = cfg.mergePips ?? 8;
-  const proximityPips = cfg.proximityPips ?? 5;
-  const enabledTfs = cfg.timeframes ?? DEFAULT_TFS;
-
-  let livePrice = price;
-  if (livePrice == null) {
-    for (const tf of ["5m", "15m", "1h", "4h", "1D"]) {
-      livePrice = extractPriceFromAnalysis(analyses[tf]);
-      if (livePrice != null) break;
-    }
-  }
-
-  let raw = [];
-  for (const tf of enabledTfs) {
-    if (analyses[tf]) raw.push(...extractLevelsFromAnalysis(analyses[tf], tf));
-  }
-  raw.push(...extractExtraLevels(extras, livePrice));
-
-  const merged = mergeZoneLevels(raw, mergePips);
-  const classified = classifyZonesAtPrice(livePrice, merged, proximityPips);
-  const htfBias = inferHtfBias(htf);
-  const zoneContext = describeZoneContext({ price: livePrice, ...classified, proximityPips });
-
-  const byTf = {};
-  for (const tf of [...new Set([...enabledTfs, "1D"])]) {
-    const a = analyses[tf];
-    if (!a || a.error) {
-      byTf[tf] = a?.error ? { error: a.error } : null;
-      continue;
-    }
-    const sr = a.support_resistance || {};
-    byTf[tf] = {
-      pivot: sr.pivot ?? null,
-      support_1: sr.support_1 ?? null,
-      support_2: sr.support_2 ?? null,
-      resistance_1: sr.resistance_1 ?? null,
-      resistance_2: sr.resistance_2 ?? null,
-      nearest_support: sr.nearest_support ?? null,
-      nearest_resistance: sr.nearest_resistance ?? null,
-    };
-  }
+  const merged = mergeZoneLevels(raw, mergePips).filter((z) => z.strength >= minStrength);
+  const classified = classifyZonesAtPrice(price, merged, proximityPips);
 
   return {
-    price: livePrice,
+    price,
     merge_pips: mergePips,
     proximity_pips: proximityPips,
-    htf_bias: htfBias,
+    timeframes,
+    htf_bias: inferHtfBias(htfTrends),
+    candles_available: Boolean(candles),
     zones: merged,
     ...classified,
-    by_timeframe: byTf,
-    zone_context: zoneContext,
   };
 }
 
@@ -241,23 +150,20 @@ export function formatMtfZonesForPrompt(stack) {
   if (!stack || stack.disabled) return "";
   const lines = [
     "",
-    "── MTF S/R ZONE STACK (4h → 1h → 15m → 5m + PDH/PDL/Asian) ──",
+    `── MTF S/R ZONE STACK (fractal swings ${(stack.timeframes || []).join("/")} + PDH/PDL/PWH/PWL/Asian + monthly pivots) ──`,
     `Price: ${stack.price ?? "?"} | HTF bias: ${stack.htf_bias}`,
   ];
-
-  if (stack.nearestSupport) {
-    const ns = stack.nearestSupport;
-    const dist = stack.price != null ? toPips(stack.price - ns.price) : "?";
-    lines.push(
-      `Nearest support: ${ns.price} (${dist}p below) strength=${ns.strength} TFs=[${ns.timeframes.join(",")}]${stack.atSupport ? " ★ AT ZONE" : ""}`,
-    );
+  if (!stack.candles_available) {
+    lines.push("⚠ Candle history unavailable — only monthly pivots below; swing/session levels missing.");
   }
-  if (stack.nearestResistance) {
-    const nr = stack.nearestResistance;
-    const dist = stack.price != null ? toPips(nr.price - stack.price) : "?";
-    lines.push(
-      `Nearest resistance: ${nr.price} (${dist}p above) strength=${nr.strength} TFs=[${nr.timeframes.join(",")}]${stack.atResistance ? " ★ AT ZONE" : ""}`,
-    );
+
+  for (const [label, z, at, dir] of [
+    ["Nearest support", stack.nearestSupport, stack.atSupport, "below"],
+    ["Nearest resistance", stack.nearestResistance, stack.atResistance, "above"],
+  ]) {
+    if (!z) continue;
+    const dist = stack.price != null ? Math.abs(toPips(stack.price - z.price)) : "?";
+    lines.push(`${label}: ${z.price} (${dist}p ${dir}) strength=${z.strength} [${z.labels.slice(0, 4).join(", ")}]${at ? " ★ AT ZONE" : ""}`);
   }
 
   for (const [label, list] of [["Support stack", stack.supports], ["Resistance stack", stack.resistances]]) {
@@ -269,12 +175,6 @@ export function formatMtfZonesForPrompt(stack) {
     }
   }
 
-  for (const note of (stack.zone_context?.notes || [])) {
-    lines.push(`  ${note}`);
-  }
-
-  lines.push(
-    "Note: S/R levels are reference only — you choose setup_type, side, entry, and SL from SMC + structure.",
-  );
+  lines.push("Note: S/R levels are reference only — you choose setup_type, side, entry, and SL from structure.");
   return lines.join("\n");
 }

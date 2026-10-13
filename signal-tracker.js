@@ -1,7 +1,9 @@
 /**
  * In-memory staging for screening-time signals.
- * Cleared when a setup is proposed or the screening session ends.
+ * Cleared at the start of every screening cycle and when a setup is proposed.
  */
+
+import { extractRsi } from "./tools/market.js";
 
 let staged = {};
 
@@ -10,8 +12,8 @@ export function stageSignals(partial) {
   staged = { ...staged, ...partial };
 }
 
-export function peekStagedSignals() {
-  return { ...staged };
+export function clearStagedSignals() {
+  staged = {};
 }
 
 export function getAndClearStagedSignals() {
@@ -20,30 +22,11 @@ export function getAndClearStagedSignals() {
   return snapshot;
 }
 
-const CONFIDENCE_MAP = {
-  "very high": 4,
-  high: 3,
-  medium: 2,
-  low: 1,
-};
+const CONFIDENCE_MAP = { "very high": 4, high: 3, medium: 2, low: 1 };
 
 function mapConfidence(label) {
   if (label == null) return null;
-  const key = String(label).trim().toLowerCase();
-  return CONFIDENCE_MAP[key] ?? null;
-}
-
-function readRsi(tech) {
-  if (!tech || typeof tech !== "object") return null;
-  const rsi = tech.indicators?.rsi ?? tech.rsi ?? tech.technical_indicators?.rsi;
-  return typeof rsi === "number" && Number.isFinite(rsi) ? rsi : null;
-}
-
-function readMomentum(tech) {
-  const momentum = tech?.market_sentiment?.momentum;
-  if (momentum === "Bullish") return 1;
-  if (momentum === "Bearish") return -1;
-  return 0;
+  return CONFIDENCE_MAP[String(label).trim().toLowerCase()] ?? null;
 }
 
 export function extractSignalsFromMtf(mtf) {
@@ -58,22 +41,13 @@ export function extractSignalsFromMtf(mtf) {
 }
 
 export function extractSignalsFromCombined(combined) {
-  if (!combined || typeof combined !== "object") return {};
+  if (!combined || typeof combined !== "object" || combined.error) return {};
   const tech = combined.technical || {};
+  const momentum = tech.market_sentiment?.momentum;
   return {
     combined_signals_agree: combined.confluence?.signals_agree ? 1 : 0,
     news_sentiment_score: combined.sentiment?.sentiment_score ?? null,
-    rsi: readRsi(tech),
-    trend_strength: readMomentum(tech),
-  };
-}
-
-export function buildSignalSnapshot({ mtf, combined, session, confidence, rr_ratio } = {}) {
-  return {
-    ...extractSignalsFromMtf(mtf),
-    ...extractSignalsFromCombined(combined),
-    session: session || null,
-    setup_confidence: confidence ?? null,
-    rr_ratio: rr_ratio ?? null,
+    rsi: extractRsi(tech.rsi),
+    trend_strength: momentum === "Bullish" ? 1 : momentum === "Bearish" ? -1 : 0,
   };
 }

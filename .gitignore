@@ -7,11 +7,10 @@ __pycache__/
 .envrypt
 user-config.json
 setups.json
-smc-state.json
 price-stream-state.json
 lessons.json
-strategies.json
 setup-memory.json
-signal-weights.json
 logs/
 .DS_Store
+screening-log.json
+*.tmp

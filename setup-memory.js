@@ -1,8 +1,8 @@
 /**
  * Setup memory — persistent history per thesis fingerprint.
  *
- * Keyed by thesisFingerprint (side|strategy|mode|entry|sl). Updated when
- * setups resolve. Injected into the SCREENER prompt for recall.
+ * Keyed by thesisFingerprint (side|setup_type|mode|price area). Updated when
+ * setups resolve. Win rate / cooldown only count FILLED trades.
  */
 
 import fs from "fs";
@@ -28,9 +28,10 @@ function save(data) {
   fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
 }
 
-function isWin(outcome) {
-  return String(outcome || "").includes("tp");
-}
+const FILLED_OUTCOMES = new Set(["sl_hit", "tp_hit", "tp_full", "tp_partial_then_sl", "time_exit"]);
+
+/** A filled position (entered on MT5), as opposed to a limit that never triggered. */
+export const isTrade = (d) => (d.filled ?? FILLED_OUTCOMES.has(d.outcome)) && d.outcome !== "cancelled";
 
 function avg(values) {
   const nums = values.filter((v) => Number.isFinite(v));
@@ -40,11 +41,13 @@ function avg(values) {
 
 function recomputeStats(entry) {
   const deploys = entry.setups || [];
-  const wins = deploys.filter((d) => isWin(d.outcome)).length;
+  const trades = deploys.filter(isTrade);
+  const wins = trades.filter((d) => (d.pnl_pips ?? 0) > 0).length;
   entry.total_setups = deploys.length;
+  entry.total_trades = trades.length;
   entry.wins = wins;
-  entry.win_rate = deploys.length ? Math.round((wins / deploys.length) * 100) : 0;
-  entry.avg_pnl_pips = Math.round(avg(deploys.map((d) => d.pnl_pips)) * 10) / 10;
+  entry.win_rate = trades.length ? Math.round((wins / trades.length) * 100) : 0;
+  entry.avg_pnl_pips = Math.round(avg(trades.map((d) => d.pnl_pips)) * 10) / 10;
   entry.last_outcome = deploys.length ? deploys[deploys.length - 1].outcome : null;
   entry.last_resolved_at = deploys.length ? deploys[deploys.length - 1].resolved_at : null;
 }
@@ -55,13 +58,13 @@ function maybeSetCooldown(entry) {
   const maxWinRate = mem.cooldownMaxWinRate ?? 25;
   const hours = mem.cooldownHours ?? 24;
 
-  if (entry.total_setups < minSetups) return;
+  if ((entry.total_trades ?? 0) < minSetups) return;
   if (entry.win_rate > maxWinRate) return;
   if (entry.cooldown_until && new Date(entry.cooldown_until) > new Date()) return;
 
   entry.cooldown_until = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
-  entry.cooldown_reason = `win rate ${entry.win_rate}% over ${entry.total_setups} setups`;
-  log("setup_memory", `Cooldown set for ${entry.thesis_id || entry.fingerprint}: ${entry.cooldown_reason}`);
+  entry.cooldown_reason = `win rate ${entry.win_rate}% over ${entry.total_trades} trades`;
+  log("setup_memory", `Cooldown set for ${entry.fingerprint}: ${entry.cooldown_reason}`);
 }
 
 export function recordSetupOutcome(setup) {
@@ -75,9 +78,10 @@ export function recordSetupOutcome(setup) {
       fingerprint: fp,
       thesis_id: setup.thesis_id || null,
       side: setup.side,
+      setup_type: setup.setup_type || null,
       mode: setup.mode,
-      strategy_id: setup.strategy_id || null,
       total_setups: 0,
+      total_trades: 0,
       wins: 0,
       win_rate: 0,
       avg_pnl_pips: 0,
@@ -94,6 +98,7 @@ export function recordSetupOutcome(setup) {
   entry.setups.push({
     setup_id: setup.id,
     outcome: setup.outcome,
+    filled: Boolean(setup.activated_at),
     pnl_pips: setup.pnl_pips ?? 0,
     confidence: setup.confidence ?? null,
     rr_ratio: setup.rr_ratio ?? null,
@@ -110,7 +115,7 @@ export function recordSetupOutcome(setup) {
   maybeSetCooldown(entry);
   save(db);
 
-  log("setup_memory", `Recorded ${setup.id} for ${entry.thesis_id || fp}: ${setup.outcome} (${setup.pnl_pips ?? 0} pips)`);
+  log("setup_memory", `Recorded ${setup.id} for ${fp}: ${setup.outcome} (${setup.pnl_pips ?? 0} pips)`);
   return entry;
 }
 
@@ -134,7 +139,7 @@ export function recallForThesis(candidate) {
   if (!entry) return null;
 
   const lines = [
-    `THESIS MEMORY [${entry.thesis_id || entry.fingerprint}]: ${entry.total_setups} past setup(s), win rate ${entry.win_rate}%, avg ${entry.avg_pnl_pips} pips, last: ${entry.last_outcome}`,
+    `THESIS MEMORY [${entry.fingerprint}]: ${entry.total_trades ?? 0} trade(s) of ${entry.total_setups} setup(s), win rate ${entry.win_rate}%, avg ${entry.avg_pnl_pips} pips, last: ${entry.last_outcome}`,
   ];
 
   if (entry.on_cooldown) {
@@ -160,6 +165,6 @@ export function getSetupMemorySummary(limit = 5) {
     const cooldown = entry.cooldown_until && new Date(entry.cooldown_until) > new Date()
       ? " [COOLDOWN]"
       : "";
-    return `${i + 1}. ${entry.thesis_id || entry.fingerprint}: ${entry.total_setups} setups, ${entry.win_rate}% win, avg ${entry.avg_pnl_pips} pips${cooldown}`;
+    return `${i + 1}. ${entry.fingerprint}: ${entry.total_trades ?? 0}/${entry.total_setups} filled, ${entry.win_rate}% win, avg ${entry.avg_pnl_pips} pips${cooldown}`;
   }).join("\n");
 }

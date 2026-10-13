@@ -2,27 +2,89 @@ import { logAction } from "../logger.js";
 import { createSetup, getOpenSetups } from "../setups.js";
 import { getRecentScreeningDecisions, logProposeBlocked } from "../screening-log.js";
 import { getActiveMode, getCurrentSession } from "../modes.js";
-import { config } from "../config.js";
-import { isStrategyApproved, setActiveStrategy, listStrategies, formatStrategiesList, backtestMcpStrategy, strategyIdFor, getActiveStrategy } from "../strategies.js";
 import { recallForThesis } from "../setup-memory.js";
-import {
-  stageSignals,
-  getAndClearStagedSignals,
-  extractSignalsFromMtf,
-  extractSignalsFromCombined,
-} from "../signal-tracker.js";
+import { recordSetupOutcome } from "../lessons.js";
+import { checkTrackRecord } from "../performance-stats.js";
+import { stageSignals, getAndClearStagedSignals, extractSignalsFromMtf, extractSignalsFromCombined } from "../signal-tracker.js";
 import { buildSMCContext, validateSMCSetup, getLastSMCContext, formatSMCForPrompt } from "../smc.js";
-import { resolveProposePrice, validateProposedEntry, validateProposedSl, validateProposedTp, validateSetupReason, validateMinRr } from "./setup-gates.js";
+import { formatMtfZonesForPrompt } from "../mtf-zones.js";
+import {
+  validateProposedEntry,
+  validateProposedSl,
+  validateProposedTp,
+  validateSetupReason,
+  validateMinRr,
+  validateConfidence,
+  validateRsi,
+} from "./setup-gates.js";
 import * as market from "./market.js";
-import * as backtest from "./backtest.js";
 
-const PROTECTED_TOOLS = new Set(["propose_setup"]);
-
-function recordProposeBlocked(result, args) {
-  if (result?.blocked || result?.skipped) {
-    logProposeBlocked(result, args);
-  }
+function blocked(check, args) {
+  const { ok, ...rest } = check;
+  const result = { success: false, blocked: true, ...rest };
+  logProposeBlocked(result, args);
   return result;
+}
+
+const SKIP_MESSAGES = {
+  open_setup_exists: (r) => `Open setup ${r.existing} on the same side is still being managed — WATCH.`,
+  thesis_cooldown: () => "This thesis (side + setup type + price area) is on cooldown after repeated losses — WATCH.",
+  max_setups_per_day: () => "Daily setup cap reached — WATCH.",
+};
+
+async function proposeSetup(args) {
+  const mode = getActiveMode();
+  const ctx = getLastSMCContext();
+  const staged = getAndClearStagedSignals();
+  const rsi = staged.rsi ?? ctx?.ltf?.rsi ?? null;
+
+  const smcCheck = validateSMCSetup(args, ctx);
+  const trackRecord = checkTrackRecord({ setup_type: args.setup_type, session: getCurrentSession(), mode: mode.id });
+  for (const check of [validateConfidence(args, mode), validateRsi(args, rsi), smcCheck, trackRecord]) {
+    if (!check.ok) return blocked(check, args);
+  }
+
+  // Fresh quote — the SMC context can be minutes old by the time the LLM proposes.
+  const quote = await market.getManagementPrice().catch(() => null);
+  const price = quote?.price ?? ctx?.price ?? null;
+
+  const entryCheck = validateProposedEntry(args, price, mode);
+  if (!entryCheck.ok) return blocked(entryCheck, args);
+
+  const tpCheck = validateProposedTp(args);
+  for (const check of [validateProposedSl(args, ctx, mode), tpCheck, validateSetupReason(args), validateMinRr(args, mode)]) {
+    if (!check.ok) return blocked(check, args);
+  }
+
+  const screeningSnapshot = {
+    ...staged,
+    rsi,
+    session: getCurrentSession(),
+    setup_confidence: Number(args.confidence) || null,
+  };
+
+  const result = createSetup({
+    ...args,
+    tp_levels: tpCheck.tp_levels ?? args.tp_levels,
+    setup_type: smcCheck.setup_type || args.setup_type,
+    confluence_factors: smcCheck.confluence || args.confluence_factors,
+    session: getCurrentSession(),
+    screening_snapshot: screeningSnapshot,
+    entry_style: entryCheck.entry_style,
+    price_at_propose: entryCheck.price_at_propose,
+  });
+
+  if (result.skipped) {
+    const recall = result.reason === "thesis_cooldown"
+      ? recallForThesis({ side: args.side, entry: args.entry, setup_type: args.setup_type, mode: mode.id })
+      : null;
+    const out = { success: false, skipped: true, ...result, message: SKIP_MESSAGES[result.reason]?.(result), recall };
+    logProposeBlocked(out, args);
+    return out;
+  }
+
+  if (result.invalidated) recordSetupOutcome(result.invalidated);
+  return { success: true, setup: result.setup, invalidated: result.invalidated?.id ?? null };
 }
 
 const toolMap = {
@@ -36,205 +98,22 @@ const toolMap = {
     stageSignals(extractSignalsFromCombined(result));
     return result;
   },
-  get_xauusd_price: () => market.getXauusdPrice(),
+  get_xauusd_price: () => market.getManagementPrice(),
   get_gold_news: (args) => market.getGoldNews(args?.limit ?? 5),
   get_market_context: () => market.getMarketSnapshot(),
-  get_mtf_zones: () => market.getMtfZoneStack(),
+  get_mtf_zones: async () => {
+    const ctx = await buildSMCContext();
+    return ctx.mtf_zones
+      ? { ...ctx.mtf_zones, summary: formatMtfZonesForPrompt(ctx.mtf_zones) }
+      : { disabled: true, summary: "MTF zones disabled in config." };
+  },
   get_smc_context: async () => {
     const ctx = await buildSMCContext();
     return { ...ctx, summary: formatSMCForPrompt(ctx) };
   },
   get_active_setups: () => ({ setups: getOpenSetups() }),
   get_recent_screening: (args) => ({ decisions: getRecentScreeningDecisions(args?.limit ?? 10) }),
-  backtest_strategy: (args) => backtest.runBacktest(args),
-  compare_strategies: (args) => backtest.compareStrategies(args),
-  list_strategies: () => ({
-    active: getActiveStrategy().id,
-    strategies: listStrategies(),
-    summary: formatStrategiesList(),
-  }),
-  backtest_mcp_strategy: (args) => backtestMcpStrategy(args.strategy, {
-    period: args.period,
-    interval: args.interval,
-    activate: args.activate === true,
-  }),
-  activate_strategy: (args) => {
-    try {
-      const id = args.strategy_id
-        || (args.mcp_strategy ? strategyIdFor(args.mcp_strategy) : null);
-      if (!id) return { error: "strategy_id or mcp_strategy required" };
-      const s = setActiveStrategy(id);
-      return { success: true, active: s.id, mcpStrategy: s.mcpStrategy, name: s.name };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  },
-  propose_setup: async (args) => {
-    const strategyId = args.strategy_id || getActiveStrategy().id;
-    if (config.strategy.requireBacktestApproval && !isStrategyApproved(strategyId)) {
-      return recordProposeBlocked({
-        success: false,
-        blocked: true,
-        reason: "strategy_not_backtest_approved",
-        strategy_id: strategyId,
-      }, args);
-    }
-
-    const mode = getActiveMode();
-    const staged = getAndClearStagedSignals();
-    const screeningSnapshot = {
-      ...staged,
-      ...(args.screening_snapshot || {}),
-      session: getCurrentSession(),
-      setup_confidence: args.confidence ?? staged.setup_confidence ?? null,
-    };
-
-    const rsi = screeningSnapshot.rsi;
-    if (config.screening?.blockExtremeRsi !== false && typeof rsi === "number") {
-      const noShort = config.screening.rsiNoShortBelow ?? 35;
-      const noLong = config.screening.rsiNoLongAbove ?? 65;
-      if (args.side === "short" && rsi < noShort) {
-        return recordProposeBlocked({
-          success: false,
-          blocked: true,
-          reason: "rsi_oversold_no_short",
-          rsi,
-          message: `RSI ${rsi} oversold — avoid short scalp (bounce risk). Prefer WATCH or wait for pullback.`,
-        }, args);
-      }
-      if (args.side === "long" && rsi > noLong) {
-        return recordProposeBlocked({
-          success: false,
-          blocked: true,
-          reason: "rsi_overbought_no_long",
-          rsi,
-          message: `RSI ${rsi} overbought — avoid long scalp. Prefer WATCH.`,
-        }, args);
-      }
-    }
-
-    const smcCheck = validateSMCSetup(
-      { ...args, screening_snapshot: screeningSnapshot },
-      getLastSMCContext(),
-    );
-    if (!smcCheck.ok) {
-      return recordProposeBlocked({
-        success: false,
-        blocked: true,
-        reason: smcCheck.reason,
-        message: smcCheck.message,
-      }, args);
-    }
-
-    const proposePrice = await resolveProposePrice(market);
-    const entryCheck = validateProposedEntry(args, proposePrice, mode);
-    if (!entryCheck.ok) {
-      return recordProposeBlocked({
-        success: false,
-        blocked: true,
-        reason: entryCheck.reason,
-        message: entryCheck.message,
-        price_at_propose: entryCheck.price_at_propose,
-        entry_distance_pips: entryCheck.distPips,
-        distPips: entryCheck.distPips,
-      }, args);
-    }
-
-    const slCheck = validateProposedSl(
-      { ...args, entry: entryCheck.entry ?? args.entry },
-      getLastSMCContext(),
-      mode,
-    );
-    if (!slCheck.ok) {
-      return recordProposeBlocked({
-        success: false,
-        blocked: true,
-        reason: slCheck.reason,
-        message: slCheck.message,
-        sl_pips: slCheck.sl_pips,
-        min_sl_pips: slCheck.min_sl_pips,
-        max_sl_pips: slCheck.max_sl_pips,
-        structure_level: slCheck.structure_level,
-        suggested_max_sl: slCheck.suggested_max_sl,
-        suggested_min_sl: slCheck.suggested_min_sl,
-      }, args);
-    }
-
-    const tpCheck = validateProposedTp({ ...args, entry: entryCheck.entry ?? args.entry });
-    if (!tpCheck.ok) {
-      return recordProposeBlocked({
-        success: false,
-        blocked: true,
-        reason: tpCheck.reason,
-        message: tpCheck.message,
-      }, args);
-    }
-
-    const reasonCheck = validateSetupReason({ ...args, entry: entryCheck.entry ?? args.entry });
-    if (!reasonCheck.ok) {
-      return recordProposeBlocked({
-        success: false,
-        blocked: true,
-        reason: reasonCheck.reason,
-        message: reasonCheck.message,
-      }, args);
-    }
-
-    const rrCheck = validateMinRr({ ...args, entry: entryCheck.entry ?? args.entry }, mode);
-    if (!rrCheck.ok) {
-      return recordProposeBlocked({
-        success: false,
-        blocked: true,
-        reason: rrCheck.reason,
-        message: rrCheck.message,
-        rr_ratio: rrCheck.rr_ratio,
-        min_rr: rrCheck.min_rr,
-        sl_pips: rrCheck.sl_pips,
-        min_tp_pips: rrCheck.min_tp_pips,
-      }, args);
-    }
-
-    const result = createSetup({
-      ...args,
-      entry: entryCheck.entry ?? args.entry,
-      tp_levels: tpCheck.tp_levels ?? args.tp_levels,
-      setup_type: smcCheck.setup_type || args.setup_type,
-      confluence_factors: smcCheck.confluence || args.confluence_factors,
-      session: getCurrentSession(),
-      screening_snapshot: screeningSnapshot,
-      entry_style: entryCheck.entry_style,
-      price_at_propose: entryCheck.price_at_propose,
-      entry_distance_pips: entryCheck.distPips,
-    });
-    if (result.skipped) {
-      const extra = result.reason === "thesis_cooldown"
-        ? { recall: recallForThesis({ side: args.side, entry: args.entry, sl: args.sl, strategy_id: strategyId, mode: mode.id }) }
-        : {};
-      return recordProposeBlocked({
-        success: false,
-        skipped: true,
-        reason: result.reason,
-        existing: result.existing,
-        thesis_id: result.thesis_id,
-        sl_pips: result.sl_pips,
-        max_sl_pips: result.max_sl_pips,
-        min_sl_pips: result.min_sl_pips,
-        rr_ratio: result.rr_ratio,
-        min_rr: result.min_rr,
-        message: result.reason === "open_setup_exists"
-          ? `Open setup ${result.existing} still active — management handles it`
-          : result.reason === "sl_too_wide"
-            ? `SL ${result.sl_pips} pips exceeds max ${result.max_sl_pips} for ${mode.id}`
-            : result.reason === "sl_too_tight"
-              ? `SL ${result.sl_pips} pips below min ${result.min_sl_pips} — place SL below next structure level, not on top of entry zone`
-              : result.reason === "rr_too_low"
-                ? (result.message || `RR ${result.rr_ratio} below min ${result.min_rr} — extend TP to next SNR/fib, do not tighten SL`)
-                : undefined,
-        ...extra,
-      }, args);
-    }
-    return { success: true, setup: result.setup };
-  },
+  propose_setup: proposeSetup,
 };
 
 export async function executeTool(name, args = {}) {
@@ -243,27 +122,18 @@ export async function executeTool(name, args = {}) {
   if (!fn) return { error: `Unknown tool: ${clean}` };
 
   const start = Date.now();
+  let result;
   try {
-    const result = await fn(args || {});
-    logAction({
-      tool: clean,
-      args,
-      result,
-      duration_ms: Date.now() - start,
-      success: !result?.error && result?.success !== false && !result?.blocked,
-    });
-    return result;
+    result = await fn(args || {});
   } catch (error) {
-    const result = { error: error.message, success: false };
-    logAction({
-      tool: clean,
-      args,
-      result,
-      duration_ms: Date.now() - start,
-      success: false,
-    });
-    return result;
+    result = { error: error.message, success: false };
   }
+  logAction({
+    tool: clean,
+    args,
+    result,
+    duration_ms: Date.now() - start,
+    success: !result?.error && result?.success !== false && !result?.blocked,
+  });
+  return result;
 }
-
-export { PROTECTED_TOOLS };
