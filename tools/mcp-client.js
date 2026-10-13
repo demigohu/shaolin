@@ -31,7 +31,14 @@ async function connectMcp() {
       throw new Error(`TradingView MCP not installed. Run: npm run mcp:install (${MCP_BIN})`);
     }
 
-    const env = { ...process.env, MARKETAUX_API_TOKEN: process.env.MARKETAUX_API_TOKEN || "" };
+    const env = {
+      ...process.env,
+      MARKETAUX_API_TOKEN: process.env.MARKETAUX_API_TOKEN || "",
+      // The MCP serves its last good TradingView result for up to 6h when TradingView
+      // fails ("stale-while-error"). Live SL/TP tracking must never run on such prices,
+      // so cap it: past this age a failure surfaces as an error instead.
+      TRADINGVIEW_MCP_STALE_TTL: process.env.TRADINGVIEW_MCP_STALE_TTL || "90",
+    };
     for (const key of SECRET_ENV) delete env[key];
 
     transport = new StdioClientTransport({ command: MCP_BIN, args: [], env, stderr: "pipe" });

@@ -23,7 +23,7 @@ import {
 } from "./notifications.js";
 import { sendMessage, startPolling, isEnabled as telegramEnabled, getTelegramStatus } from "./telegram.js";
 import { closeMcp } from "./tools/mcp-client.js";
-import { getManagementPrice, fetchAnalysis, extractPriceFromAnalysis } from "./tools/market.js";
+import { getManagementPrice, fetchAnalysis, extractPriceFromAnalysis, isTradingViewBackingOff } from "./tools/market.js";
 import { getActivePlan, createPlan, checkPlanInvalidation, formatPlanForPrompt, formatPlanMessage } from "./planner.js";
 import { detectTriggers, poolsFromContext } from "./watcher.js";
 import { formatAgentStatus } from "./status.js";
@@ -295,6 +295,7 @@ export async function runManagementCycle({ silent = false, forceDigest = false, 
     }
     log("mgmt", `Price ${price} from ${quote.source}${quote.timeframe ? ` ${quote.timeframe}` : ""}${quote.basis != null ? ` (basis ${quote.basis})` : ""}`);
 
+    await handlePlanInvalidation(price);
     const events = await expireOpenSetups(mode, price);
     const updated = [];
     const resolved = [];
@@ -359,32 +360,34 @@ export async function runPlanning(reason = "scheduled") {
  * Every minute, without the LLM: void the plan if price broke its invalidation
  * (re-plan), and fire a screening when price reaches a POI or sweeps a pool.
  */
+async function handlePlanInvalidation(price) {
+  const invalidated = checkPlanInvalidation(price);
+  if (!invalidated) return;
+  if (config.plan?.notifyTelegram !== false) await sendMessage(`🗺 Plan invalidated — ${invalidated}. Re-planning…`);
+  if (Date.now() - _lastPlanAt > (config.plan?.replanCooldownMin ?? 60) * 60_000) {
+    runPlanning(`re-plan: ${invalidated}`).catch((e) => log("plan_error", e.message));
+  }
+}
+
 async function runWatcher() {
   if (config.watcher?.enabled === false) return;
   if (config.screening?.skipWeekends !== false && isWeekendMarketClosed()) return;
   const mode = getActiveMode();
   if (!isSessionAllowed(mode)) return;
+  // Open setups: the management fast poll already tracks price (and plan invalidation).
+  if (_screeningBusy || getOpenSetups().length || isTradingViewBackingOff()) return;
+  if (Date.now() - _lastScreeningAt < (config.watcher?.minGapMin ?? 3) * 60_000) return;
 
+  // One TradingView request per minute: live price + the current 5m bar's wick for sweeps.
   const m5 = await fetchAnalysis("5m", { maxAgeMs: 50_000 });
-  const m15 = await fetchAnalysis("15m", { maxAgeMs: 50_000 });
   const price = extractPriceFromAnalysis(m5);
   if (price == null) return;
-
-  const invalidated = checkPlanInvalidation(price);
-  if (invalidated) {
-    if (config.plan?.notifyTelegram !== false) await sendMessage(`🗺 Plan invalidated — ${invalidated}. Re-planning…`);
-    if (Date.now() - _lastPlanAt > (config.plan?.replanCooldownMin ?? 60) * 60_000) {
-      runPlanning(`re-plan: ${invalidated}`).catch((e) => log("plan_error", e.message));
-    }
-  }
-
-  if (_screeningBusy || getOpenSetups().length) return;
-  if (Date.now() - _lastScreeningAt < (config.watcher?.minGapMin ?? 3) * 60_000) return;
+  await handlePlanInvalidation(price);
 
   const ctx = getLastSMCContext();
   const triggers = detectTriggers({
     price,
-    bar: { high: Number(m15?.price_data?.high), low: Number(m15?.price_data?.low) },
+    bar: { high: Number(m5?.price_data?.high), low: Number(m5?.price_data?.low) },
     pois: getActivePlan()?.pois || [],
     pools: poolsFromContext(ctx),
     proximityPips: mode.entryZonePips ?? 5,

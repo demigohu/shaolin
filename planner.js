@@ -133,7 +133,7 @@ export function sanitizePlan(raw, { price, reach }) {
       zone_high: hi,
       level_type: String(p.level_type || "").slice(0, 160),
       setups: (Array.isArray(p.setups) ? p.setups : []).filter((s) => SETUP_TYPES.includes(s)),
-      trigger: String(p.trigger || "").slice(0, 240),
+      trigger: String(p.trigger || "").slice(0, 500),
       targets: (Array.isArray(p.targets) ? p.targets : []).map(num).filter((t) => t != null).slice(0, 3),
       note: p.note ? String(p.note).slice(0, 200) : null,
     });
@@ -144,7 +144,7 @@ export function sanitizePlan(raw, { price, reach }) {
     bias_reason: String(raw?.bias_reason || "").slice(0, 400),
     invalidation: { above: num(raw?.invalidation_above), below: num(raw?.invalidation_below) },
     pois,
-    session_notes: raw?.session_notes ? String(raw.session_notes).slice(0, 400) : null,
+    session_notes: raw?.session_notes ? String(raw.session_notes).slice(0, 800) : null,
   };
 }
 

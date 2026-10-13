@@ -5,7 +5,14 @@ import { log } from "../logger.js";
 import { getGoldHeadlines } from "./news.js";
 
 const ANALYSIS_TTL_MS = 30_000;
+const BACKOFF_MS = 90_000;
 const analysisCache = new Map();
+let tvBackoffUntil = 0;
+
+/** True while TradingView is cooling down after an error (callers should skip optional fetches). */
+export function isTradingViewBackingOff() {
+  return Date.now() < tvBackoffUntil;
+}
 
 /** TradingView coin_analysis puts live price under price_data, not top-level. */
 export function extractPriceFromAnalysis(analysis) {
@@ -38,6 +45,8 @@ export function extractRsi(source) {
 export async function fetchAnalysis(timeframe, { maxAgeMs = ANALYSIS_TTL_MS } = {}) {
   const hit = analysisCache.get(timeframe);
   if (hit && Date.now() - hit.at < maxAgeMs) return hit.promise;
+  // After a failure TradingView returns empty bodies for 30–90s; hammering it extends the outage.
+  if (isTradingViewBackingOff()) return { error: "TradingView backing off after recent errors", timeframe };
 
   const promise = callMcpTool("coin_analysis", {
     symbol: config.market.dataSymbol,
@@ -47,7 +56,11 @@ export async function fetchAnalysis(timeframe, { maxAgeMs = ANALYSIS_TTL_MS } = 
   analysisCache.set(timeframe, { at: Date.now(), promise });
 
   const result = await promise;
-  if (result?.error) analysisCache.delete(timeframe);
+  if (result?.error) {
+    analysisCache.delete(timeframe);
+    tvBackoffUntil = Date.now() + BACKOFF_MS;
+    log("tv_warn", `TradingView ${timeframe} failed (${String(result.error).slice(0, 120)}) — backing off ${BACKOFF_MS / 1000}s`);
+  }
   return result;
 }
 
