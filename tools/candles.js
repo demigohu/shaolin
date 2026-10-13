@@ -94,7 +94,7 @@ export async function fetchCandles(interval) {
   } catch (error) {
     if (hit && Date.now() - hit.at < STALE_OK_MS) {
       log("candles_warn", `Yahoo ${interval} failed (${error.message}) — using cached candles`);
-      return hit;
+      return { ...hit, stale: true };
     }
     throw new Error(`Yahoo ${interval} candles: ${error.message}`);
   }
@@ -153,10 +153,17 @@ export async function getSpotCandleSet(spotPrice) {
   const h1 = await fetchCandles("1h");
   const d1 = await fetchCandles("1d");
 
-  const futuresLast = m5.last;
-  if (futuresLast == null) return null;
-  const basis = futuresLast - spotPrice;
-  lastBasis = { basis, at: Date.now() };
+  // Basis must pair a FRESH futures quote with the live spot price; a stale quote
+  // would shift every level by however far price moved since it was cached.
+  let basis;
+  if (!m5.stale && m5.last != null) {
+    basis = m5.last - spotPrice;
+    lastBasis = { basis, at: Date.now() };
+  } else {
+    basis = getRecentBasis();
+    if (basis == null) throw new Error("no fresh futures quote to measure the futures→spot basis");
+    log("candles_warn", `5m quote stale — reusing basis ${basis.toFixed(2)} measured ${Math.round((Date.now() - lastBasis.at) / 60000)}m ago`);
+  }
 
   const h1Spot = shiftCandles(h1.candles, basis);
   const d1Spot = shiftCandles(d1.candles, basis);
