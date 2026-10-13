@@ -115,6 +115,8 @@ export const config = {
     feedLabel: u.market?.feedLabel ?? "TVC:GOLD",
     displayName: u.displayName ?? u.market?.displayName ?? "XAUUSD",
     yahooSymbol: u.yahooSymbol ?? u.market?.yahooSymbol ?? "GC=F",
+    // Route the MCP's TradingView requests through the PROXY_* Webshare proxy (cloud IPs get throttled).
+    tradingviewViaProxy: u.market?.tradingviewViaProxy === true,
   },
   broker: {
     name: u.brokerName ?? u.broker?.name ?? "HFM",

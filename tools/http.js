@@ -6,8 +6,8 @@
 
 import { fetch as undiciFetch, ProxyAgent } from "undici";
 
-/** New ProxyAgent on a random sticky session (another exit IP), or null when not configured. */
-export function proxyDispatcher() {
+/** Proxy URL on a random sticky session (another exit IP), or null when not configured. */
+export function proxyUrl() {
   const prefix = process.env.PROXY_USERNAME_PREFIX;
   const password = process.env.PROXY_PASSWORD;
   if ((process.env.PROXY_ENABLED ?? "true").toLowerCase() !== "true" || !prefix || !password) return null;
@@ -16,7 +16,12 @@ export function proxyDispatcher() {
   const session = min + Math.floor(Math.random() * (max - min + 1));
   const host = process.env.PROXY_HOST || "p.webshare.io";
   const port = process.env.PROXY_PORT || "80";
-  return new ProxyAgent(`http://${encodeURIComponent(`${prefix}-${session}`)}:${encodeURIComponent(password)}@${host}:${port}`);
+  return `http://${encodeURIComponent(`${prefix}-${session}`)}:${encodeURIComponent(password)}@${host}:${port}`;
+}
+
+export function proxyDispatcher() {
+  const url = proxyUrl();
+  return url ? new ProxyAgent(url) : null;
 }
 
 export function describeError(error) {

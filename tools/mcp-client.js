@@ -4,6 +4,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { REPO_ROOT } from "../repo-root.js";
 import { log } from "../logger.js";
+import { config } from "../config.js";
+import { proxyUrl } from "./http.js";
 
 const MCP_BIN = path.join(REPO_ROOT, "mcp", ".venv", "bin", "tradingview-mcp");
 const SECRET_ENV = ["LLM_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_BOT_TOKEN"];
@@ -39,6 +41,13 @@ async function connectMcp() {
       // so cap it: past this age a failure surfaces as an error instead.
       TRADINGVIEW_MCP_STALE_TTL: process.env.TRADINGVIEW_MCP_STALE_TTL || "90",
     };
+    // Cloud IPs get throttled by TradingView's scanner; route the MCP (requests/httpx honour
+    // HTTPS_PROXY) through a Webshare session. Each (re)connect picks a new exit IP.
+    const tvProxy = config.market.tradingviewViaProxy ? proxyUrl() : null;
+    if (tvProxy) {
+      env.HTTPS_PROXY = tvProxy;
+      env.HTTP_PROXY = tvProxy;
+    }
     for (const key of SECRET_ENV) delete env[key];
 
     transport = new StdioClientTransport({ command: MCP_BIN, args: [], env, stderr: "pipe" });
@@ -57,7 +66,7 @@ async function connectMcp() {
     };
     await c.connect(transport);
     client = c;
-    log("mcp", "TradingView MCP connected");
+    log("mcp", `TradingView MCP connected${tvProxy ? " (via proxy)" : ""}`);
     return client;
   })();
 

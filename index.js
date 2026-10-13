@@ -153,12 +153,21 @@ export async function runScreeningCycle({ silent = false, trigger = null } = {})
 
     clearStagedSignals();
     let smcSummary = null;
+    let smcCtx = null;
     if (config.smc?.enabled !== false) {
       try {
-        smcSummary = formatSMCForPrompt(await buildSMCContext());
+        smcCtx = await buildSMCContext();
+        smcSummary = formatSMCForPrompt(smcCtx);
       } catch (error) {
         log("smc_error", error.message);
       }
+    }
+    // No live price → the answer can only be WATCH; don't spend an LLM call on it.
+    if (smcCtx && smcCtx.price == null) {
+      const msg = "WATCH — no live TradingView price this cycle (feed unavailable / rate-limited)";
+      appendScreeningDecision({ action: "WATCH", summary: msg, reason: "no_price" });
+      log("screen", msg);
+      return msg;
     }
 
     const goal = [

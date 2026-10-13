@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import { callMcpTool } from "./mcp-client.js";
+import { callMcpTool, closeMcp } from "./mcp-client.js";
 import { getActiveMode } from "../modes.js";
 import { log } from "../logger.js";
 import { getGoldHeadlines } from "./news.js";
@@ -60,6 +60,11 @@ export async function fetchAnalysis(timeframe, { maxAgeMs = ANALYSIS_TTL_MS } = 
     analysisCache.delete(timeframe);
     tvBackoffUntil = Date.now() + BACKOFF_MS;
     log("tv_warn", `TradingView ${timeframe} failed (${String(result.error).slice(0, 120)}) — backing off ${BACKOFF_MS / 1000}s`);
+    // Through a proxy, a throttled exit IP is fixed by reconnecting on a new session.
+    if (config.market.tradingviewViaProxy) {
+      log("tv_warn", "Restarting MCP on a new proxy session");
+      closeMcp().catch(() => {});
+    }
   }
   return result;
 }

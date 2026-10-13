@@ -6,6 +6,7 @@
     "dataExchange": "TVC",
     "displayName": "XAUUSD",
     "yahooSymbol": "GC=F",
+    "tradingviewViaProxy": false,
     "feedLabel": "TVC:GOLD"
   },
   "broker": {
