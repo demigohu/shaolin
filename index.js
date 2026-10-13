@@ -30,6 +30,7 @@ import { formatAgentStatus } from "./status.js";
 import { formatPerformanceStats } from "./performance-stats.js";
 import { getSetupMemorySummary } from "./setup-memory.js";
 import { clearStagedSignals } from "./signal-tracker.js";
+import { cleanContent, parseVerdict } from "./verdict.js";
 import { getCalendarEvents, checkNewsBlackout, formatCalendarForPrompt, upcomingEvents, formatEvent } from "./tools/calendar.js";
 import { buildSMCContext, formatSMCForPrompt, getLastSMCContext } from "./smc.js";
 
@@ -76,19 +77,6 @@ function extractLastSetupFromMessages(messages) {
     } catch { /* not JSON */ }
   }
   return null;
-}
-
-/** Strip markdown/code fences so logs and the next prompt stay plain text. */
-function cleanContent(content) {
-  return String(content || "").replace(/```[a-z]*\n?/gi, "").replace(/\bprint\((["'])(.*?)\1\)/g, "$2").trim();
-}
-
-/** Final LLM message is asked to start with SETUP / WATCH / AVOID. */
-function classifyAction(content) {
-  const head = String(content || "").replace(/[*_#>\s]/g, " ").trim().toUpperCase();
-  if (head.startsWith("AVOID")) return "AVOID";
-  if (head.startsWith("WATCH")) return "WATCH";
-  return /\bAVOID\b/i.test(content || "") ? "AVOID" : "WATCH";
 }
 
 export async function runScreeningCycle({ silent = false, trigger = null } = {}) {
@@ -191,8 +179,7 @@ export async function runScreeningCycle({ silent = false, trigger = null } = {})
     content = cleanContent(content);
 
     // Some models describe a SETUP in prose instead of calling the tool — nothing gets logged then.
-    if (!extractLastSetupFromMessages(messages) && /\bSETUP\b/.test(content) && classifyAction(content) !== "AVOID"
-      && !/^\W*WATCH/i.test(content)) {
+    if (!extractLastSetupFromMessages(messages) && parseVerdict(content) === "SETUP") {
       log("screen", "Model concluded SETUP without calling propose_setup — asking it to call the tool");
       ({ content, messages } = await agentLoop(
         "You concluded SETUP but did not call propose_setup, so nothing was logged. Call propose_setup now with side, entry, sl, sl_anchor, tp_levels (price + label), confidence, setup_type, confluence_factors and reason. If you cannot fill those from the data, reply WATCH with the reason.",
@@ -218,7 +205,7 @@ export async function runScreeningCycle({ silent = false, trigger = null } = {})
       return formatSetupAlert(setup);
     }
 
-    const action = classifyAction(content);
+    const action = parseVerdict(content) === "AVOID" ? "AVOID" : "WATCH";
     log("screen", `Result: ${action} — ${content.replace(/\s+/g, " ").slice(0, 200)}`);
     appendScreeningDecision({ action, summary: content?.slice(0, 200), reason: content?.slice(0, 500) });
     const sendDigest = notify && config.notifications?.notifyScreeningDigest

@@ -67,7 +67,7 @@ HOW TO DECIDE (every cycle):
    Trigger not complete → WATCH (say what is missing). Never enter on a touch alone.
 3. Confirm with get_xauusd_mtf + get_xauusd_combined (momentum/RSI). Need ≥2 confluence.
 4. SETUP → propose_setup. If rejected, the response says why — fix that one thing (never by tightening SL) and retry, or WATCH.
-5. Final message starts with "SETUP", "WATCH" or "AVOID" + the reasoning. Price null or candle history unavailable → WATCH.
+5. Your final message's FIRST LINE is exactly one word: SETUP, WATCH or AVOID (no header, no markdown). Reasoning follows on the next lines — keep it short. Price null or candle history unavailable → WATCH.
 
 ENTRY:
 - market: on the trigger candle / RTO now (entry within a few pips of live price).
