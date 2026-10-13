@@ -36,25 +36,38 @@ function proxyDispatcher() {
   return new ProxyAgent(`http://${encodeURIComponent(`${prefix}-${session}`)}:${encodeURIComponent(password)}@${host}:${port}`);
 }
 
+const PROXY_ATTEMPTS = 3;
+
+function describeError(error) {
+  const cause = error.cause;
+  return cause ? `${error.message}: ${cause.code || cause.message || cause}` : error.message;
+}
+
+/** Try each Yahoo host; through a proxy, each attempt uses a fresh session (another exit IP). */
 async function fetchChart(interval) {
   const symbol = encodeURIComponent(config.market.yahooSymbol);
-  const dispatcher = proxyDispatcher();
   const errors = [];
-  for (const host of HOSTS) {
-    const url = `https://${host}/v8/finance/chart/${symbol}?interval=${interval}&range=${RANGE[interval]}`;
-    try {
-      const res = await undiciFetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0" },
-        signal: AbortSignal.timeout(15_000),
-        ...(dispatcher ? { dispatcher } : {}),
-      });
-      if (res.ok) return res.json();
-      errors.push(`${host} HTTP ${res.status}`);
-    } catch (error) {
-      errors.push(`${host} ${error.message}`);
+  const attempts = proxyDispatcher() ? PROXY_ATTEMPTS : 1;
+  let viaProxy = false;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const dispatcher = proxyDispatcher();
+    viaProxy = Boolean(dispatcher);
+    for (const host of HOSTS) {
+      const url = `https://${host}/v8/finance/chart/${symbol}?interval=${interval}&range=${RANGE[interval]}`;
+      try {
+        const res = await undiciFetch(url, {
+          headers: { "User-Agent": "Mozilla/5.0" },
+          signal: AbortSignal.timeout(15_000),
+          ...(dispatcher ? { dispatcher } : {}),
+        });
+        if (res.ok) return res.json();
+        errors.push(`${host} HTTP ${res.status}`);
+      } catch (error) {
+        errors.push(`${host} ${describeError(error)}`);
+      }
     }
   }
-  throw new Error(`${errors.join(", ")}${dispatcher ? " (via proxy)" : " (no proxy — set PROXY_* in .env)"}`);
+  throw new Error(`${[...new Set(errors)].join(", ")}${viaProxy ? " (via proxy)" : " (no proxy — set PROXY_* in .env)"}`);
 }
 
 export async function fetchCandles(interval) {
