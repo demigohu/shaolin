@@ -16,12 +16,17 @@ import {
   isLondonOpenWindow,
   isNewYorkOpenWindow,
   describeTradingWindowsWib,
+  tzOffsetHours,
 } from "./smc-sessions.js";
 import { getActiveMode } from "./modes.js";
 import {
   asianRange,
   previousDayHL,
   previousWeekHL,
+  previousMonthHL,
+  tradingDayStart,
+  dayHighLow,
+  equalLevels,
   swingRange,
   detectBos,
   findOrderBlocks,
@@ -37,35 +42,33 @@ export function getLastSMCContext() {
   return _lastSMCContext;
 }
 
+/** Setups from "Market Structure and Powerful Setups" (docs/). */
 export const SETUP_TYPES = [
-  "dip_reclaim_long",   // DIP → structure intact → absorption → reclaim → long
-  "dip_reclaim_short",  // Rally → structure intact → distribution → reclaim → short
-  "fib_retrace",        // Entry at fib SNR (0.5–0.786) after impulse
-  "snr_bounce_long",    // Demand at MTF support + confirmation
-  "snr_bounce_short",   // Supply at MTF resistance + confirmation
-  "turtle_soup_long",   // SSL raid / false break (PDF)
-  "turtle_soup_short",  // BSL raid / false break (PDF)
-  "sh_bms_rto",
-  "sms_bms_rto",
-  "amd_distribution",
+  "turtle_soup_long",   // SSL raid: false break below a sell-stop pool, enter long
+  "turtle_soup_short",  // BSL raid: false break above a buy-stop pool, enter short
+  "sh_bms_rto",         // stop hunt → break in market structure → return to order block
+  "sms_bms_rto",        // failure swing → break in market structure → return to order block
+  "bms_rto_ote",        // after BMS, retrace to 50% / OTE (0.618–0.72) or the OB, trade with the BMS
+  "amd_distribution",   // Asian accumulation → London/NY manipulation → distribution the other way
 ];
 
+/** Setups that fade a liquidity raid (exempt from trend-only filters). */
+export const REVERSAL_SETUPS = new Set(["turtle_soup_long", "turtle_soup_short", "sh_bms_rto", "sms_bms_rto", "amd_distribution"]);
+
 export const CONFLUENCE_TAGS = [
-  "htf_bias",
-  "ltf_structure",
-  "snr_zone",
-  "fib_retrace",
-  "absorption",
-  "reclaim",
-  "liquidity_sweep",
-  "order_block_rto",
-  "fib_ote",
+  "htf_bias",          // trade in the direction of HTF structure
+  "htf_key_level",     // at an HTF order block / liquidity pool / structure level
+  "mtf_sr_zone",       // multi-TF S/R cluster
+  "liquidity_sweep",   // BSL/SSL just swept
+  "bms",               // break in market structure on the entry TF
+  "order_block_rto",   // return to the order block that caused the BMS
+  "fib_ote",           // 50% / OTE retracement
+  "asian_range",       // Asian high/low as the swept or targeted pool
+  "session_amd",       // AMD phase fits (manipulation at London/NY open)
   "london_open",
   "ny_open",
-  "asian_range",
-  "session_amd",
-  "news_catalyst",
-  "mtf_sr_zone",
+  "high_impact_news",  // liquidity grab around a scheduled release
+  "plan_poi",          // at a POI from today's plan
 ];
 
 /** Liquidity taken (price beyond) or swept (wick beyond, closed back inside). */
@@ -123,13 +126,13 @@ export function detectLiquidityEvents(price, pools, recentCandles = []) {
   return { events, hints };
 }
 
-function suggestPlaybooks(liquidityEvents, amdPhase, trend) {
+function suggestPlaybooks(liquidityEvents, amdPhase, ltfBos) {
   const plays = [];
   const { ssl, bsl } = sideOfLiquidity(liquidityEvents);
-  if (ssl) plays.push("turtle_soup_long", "sh_bms_rto");
-  if (bsl) plays.push("turtle_soup_short", "sms_bms_rto");
-  if (amdPhase === "ny_distribution" || amdPhase === "london_manipulation") plays.push("amd_distribution");
-  if (trend === "Bullish" || trend === "Bearish") plays.push("fib_retrace");
+  if (ssl) plays.push("turtle_soup_long", "sh_bms_rto (long)");
+  if (bsl) plays.push("turtle_soup_short", "sh_bms_rto (short)");
+  if (ltfBos?.bos) plays.push(`bms_rto_ote (${ltfBos.bos === "bullish_bos" ? "long" : "short"})`);
+  if (amdPhase === "london_manipulation" || amdPhase === "ny_distribution") plays.push("amd_distribution");
   return [...new Set(plays)];
 }
 
@@ -143,21 +146,21 @@ export const STRUCTURE_PROFILES = {
     swing: { key: "h1", tf: "1h", lookback: 48 }, bos: { key: "m15", tf: "15m" }, ob: { key: "m15", tf: "15m" },
     wick: { key: "m5", tf: "5m" }, sweep: { key: "m15", bars: 8 },
     zones: ["4h", "1h", "15m", "5m"], mergePips: 8, proximityPips: 5,
-    pools: ["asian", "pd"], killzoneGate: true,
+    pools: ["asian", "pd", "eq"], eq: [["m15", "15m"], ["h1", "1h"]], killzoneGate: true,
   },
   day: {
     tvTfs: ["15m", "1h", "4h", "1D"], htf: ["1D", "4h", "1h"], rsiTf: "1h",
     swing: { key: "h4", tf: "4h", lookback: 30 }, bos: { key: "h1", tf: "1h" }, ob: { key: "h1", tf: "1h" },
     wick: { key: "m15", tf: "15m" }, sweep: { key: "h1", bars: 6 },
     zones: ["1d", "4h", "1h", "15m"], mergePips: 15, proximityPips: 10,
-    pools: ["asian", "pd", "pw"], killzoneGate: true,
+    pools: ["asian", "pd", "pw", "eq"], eq: [["h1", "1h"], ["h4", "4h"]], killzoneGate: true,
   },
   swing: {
     tvTfs: ["1h", "4h", "1D", "1W"], htf: ["1W", "1D", "4h"], rsiTf: "4h",
     swing: { key: "d1", tf: "1D", lookback: 40 }, bos: { key: "h4", tf: "4h" }, ob: { key: "h4", tf: "4h" },
     wick: { key: "h1", tf: "1h" }, sweep: { key: "h4", bars: 6 },
     zones: ["1w", "1d", "4h", "1h"], mergePips: 40, proximityPips: 25,
-    pools: ["pd", "pw"], killzoneGate: false,
+    pools: ["pd", "pw", "pm", "eq"], eq: [["h4", "4h"], ["d1", "1D"]], killzoneGate: false,
   },
 };
 
@@ -170,9 +173,14 @@ export function getStructureProfile(mode = getActiveMode()) {
   };
 }
 
-export async function buildSMCContext() {
+/**
+ * Build the structure context. `profileId` / `reachPips` let the planner read a
+ * higher-timeframe view; `store: false` keeps the screener's cached context intact.
+ */
+export async function buildSMCContext({ profileId = null, reachPips = undefined, store = true } = {}) {
   const mode = getActiveMode();
-  const profile = getStructureProfile(mode);
+  const profile = getStructureProfile(profileId ? { ...mode, id: profileId } : mode);
+  const reach = reachPips === undefined ? mode.maxTpPips ?? null : reachPips;
 
   // Sequential (cached) TF fetches — parallel bursts trigger TradingView failure cooldowns.
   const tv = {};
@@ -205,6 +213,13 @@ export async function buildSMCContext() {
   const asian = candles ? asianRange(candles.m15, now) : null;
   const { pdh, pdl } = candles ? previousDayHL(candles.d1, now.getTime()) : { pdh: null, pdl: null };
   const { pwh, pwl } = candles ? previousWeekHL(candles.d1, now.getTime()) : { pwh: null, pwl: null };
+  const { pmh, pml } = candles ? previousMonthHL(candles.d1, now.getTime()) : { pmh: null, pml: null };
+  const dayStart = tradingDayStart(now.getTime(), tzOffsetHours("America/New_York", now));
+  const { hod, lod } = candles ? dayHighLow(candles.m15, dayStart) : { hod: null, lod: null };
+  const eqTol = config.smc?.equalTolPips ?? profile.proximityPips * 2;
+  const equal = candles
+    ? profile.eq.flatMap(([key, tf]) => equalLevels(candles[key], eqTol).map((e) => ({ ...e, tf })))
+    : [];
 
   const minAsianWidth = config.smc?.asianRangeMinPips ?? 5;
   // A range still being built contains the current price, so it can't be "raided" yet.
@@ -213,8 +228,12 @@ export async function buildSMCContext() {
     asian: asianUsable ? { name: "asian", high: asian.high, low: asian.low } : null,
     pd: pdh != null || pdl != null ? { name: "pd", high: pdh, low: pdl } : null,
     pw: pwh != null || pwl != null ? { name: "pw", high: pwh, low: pwl } : null,
+    pm: pmh != null || pml != null ? { name: "pm", high: pmh, low: pml } : null,
   };
-  const pools = profile.pools.map((p) => poolDefs[p]).filter(Boolean);
+  const eqPools = profile.pools.includes("eq")
+    ? equal.map((e) => (e.kind === "eqh" ? { name: `eqh_${e.tf}`, high: e.price } : { name: `eql_${e.tf}`, low: e.price }))
+    : [];
+  const pools = [...profile.pools.map((p) => poolDefs[p]).filter(Boolean), ...eqPools];
   const sweepCandles = candles ? candles[profile.sweep.key].slice(-profile.sweep.bars) : [];
   const liquidity = detectLiquidityEvents(price, pools, sweepCandles);
 
@@ -260,6 +279,11 @@ export async function buildSMCContext() {
     pdl,
     pwh,
     pwl,
+    pmh,
+    pml,
+    hod,
+    lod,
+    equal_levels: equal,
     htf: Object.fromEntries(htfEntries.map(([tf], i) => [tf, htfTrends[i]])),
     ltf: { rsi: extractRsi(tv[profile.rsiTf]?.rsi), rsi_tf: profile.rsiTf },
     structure,
@@ -268,9 +292,9 @@ export async function buildSMCContext() {
     order_blocks: orderBlocks,
     liquidity_events: liquidity.events,
     liquidity_hints: liquidity.hints,
-    suggested_setups: suggestPlaybooks(liquidity.events, amdPhase, swingTrend),
+    suggested_setups: suggestPlaybooks(liquidity.events, amdPhase, structure.ltf_bos),
     min_confluence: config.smc?.minConfluence ?? 2,
-    reach_pips: mode.maxTpPips ?? null,
+    reach_pips: reach,
   };
 
   if (config.mtfZones?.enabled !== false) {
@@ -278,19 +302,19 @@ export async function buildSMCContext() {
       candles,
       pivots: tv[profile.tvTfs[0]]?.support_resistance,
       price,
-      extras: { pdh, pdl, pwh, pwl, asian: asianUsable && profile.pools.includes("asian") ? asian : null },
+      extras: { pdh, pdl, pwh, pwl, pmh, pml, hod, lod, equal, asian: asianUsable && profile.pools.includes("asian") ? asian : null },
       htfTrends: htfTrends.slice(0, 2),
       timeframes: profile.zones,
       mergePips: profile.mergePips,
-      reachPips: mode.maxTpPips ?? null,
+      reachPips: reach,
       proximityPips: profile.proximityPips,
     });
     context.ltf.nearest_support = context.mtf_zones.nearestSupport?.price ?? null;
     context.ltf.nearest_resistance = context.mtf_zones.nearestResistance?.price ?? null;
   }
 
-  log("smc", `Context [${mode.id}] ${wib.label} ${amdPhase} price=${price} basis=${candles?.basis ?? "?"} events=${liquidity.events.join(",") || "none"}`);
-  _lastSMCContext = context;
+  log("smc", `Context [${mode.id}${profileId ? `/${profileId} view` : ""}] ${wib.label} ${amdPhase} price=${price} basis=${candles?.basis ?? "?"} events=${liquidity.events.join(",") || "none"}`);
+  if (store) _lastSMCContext = context;
   return context;
 }
 
@@ -303,7 +327,7 @@ function formatTradingWindowLine(ctx) {
   }
   return ctx.trading_window
     ? `Killzone (${ctx.trading_windows}): YES — preferred entry time`
-    : `Killzone (${ctx.trading_windows}): NO — only turtle_soup_* / dip_reclaim_* after a liquidity raid are accepted now`;
+    : `Killzone (${ctx.trading_windows}): NO — only turtle_soup_* / sh_bms_rto after a liquidity raid are accepted now`;
 }
 
 const fmt = (v) => (v == null ? "?" : Number(v).toFixed(2));
@@ -342,6 +366,12 @@ export function formatSMCForPrompt(ctx) {
   }
   if (ctx.pdh != null) lines.push(`PDH ${lvl(ctx, ctx.pdh)} | PDL ${lvl(ctx, ctx.pdl)}`);
   if (ctx.pwh != null) lines.push(`PWH ${lvl(ctx, ctx.pwh)} | PWL ${lvl(ctx, ctx.pwl)}`);
+  if (ctx.pmh != null) lines.push(`PMH ${lvl(ctx, ctx.pmh)} | PML ${lvl(ctx, ctx.pml)}`);
+  if (ctx.hod != null) lines.push(`Today HOD ${lvl(ctx, ctx.hod)} | LOD ${lvl(ctx, ctx.lod)}`);
+  const byDistance = (ctx.equal_levels || []).slice().sort((x, y) => Math.abs(x.price - ctx.price) - Math.abs(y.price - ctx.price));
+  for (const e of byDistance.slice(0, 4)) {
+    lines.push(`Equal ${e.kind === "eqh" ? "highs (BSL)" : "lows (SSL)"} ${e.tf}: ${lvl(ctx, e.price)} ×${e.touches}`);
+  }
   if (ctx.swing) lines.push(`${ctx.profile.swing_tf} swing (${ctx.swing.source}): low ${lvl(ctx, ctx.swing.swing_low)} – high ${lvl(ctx, ctx.swing.swing_high)}`);
   if (ctx.fib) {
     const lv = ctx.fib.levels;
@@ -364,24 +394,23 @@ export function formatSMCForPrompt(ctx) {
   }
   for (const h of ctx.liquidity_hints.slice(0, 4)) lines.push(`  → ${h}`);
 
-  lines.push("", "DIP → ENTRY checklist (long; mirror for short):");
-  lines.push("  1 DIP — pullback in HTF trend (not random noise)");
-  lines.push("  2 STRUCTURE — HTF intact (no BOS against your bias)");
-  lines.push("  3 ABSORPTION — wick/OB/RSI stall at SNR or fib (smart money in)");
-  lines.push("  4 RECLAIM — close back above/below key level (failed breakdown/breakout)");
-  lines.push("  5 ENTRY — market at reclaim or limit at fib 0.5–0.786 / SNR");
-
-  lines.push("", "SETUP TYPES (you choose — cite in propose_setup):");
-  lines.push("  dip_reclaim_long | dip_reclaim_short — core DIP framework");
-  lines.push("  fib_retrace | snr_bounce_long | snr_bounce_short — SNR + fib entry");
-  lines.push("  turtle_soup_long | turtle_soup_short — liquidity false break");
-  lines.push("  sh_bms_rto | sms_bms_rto | amd_distribution — break of structure + return to OB / session distribution");
+  lines.push("", "FRAMEWORK — HTF key level first, LTF trigger second (mirror for shorts):");
+  lines.push("  1 HTF bias + key levels: order blocks, liquidity pools (PDH/PDL, PWH/PWL, PMH/PML, Asian H/L, EQH/EQL, HOD/LOD), plan POIs.");
+  lines.push("  2 Wait for price AT a key level — ideally in the London/NY killzone or around a high-impact release.");
+  lines.push("  3 Trigger (exactly one setup_type):");
+  lines.push("    turtle_soup_long/short — pool swept (wick beyond SSL/BSL) and price back inside → enter against the sweep; SL beyond the sweep extreme.");
+  lines.push("    sh_bms_rto — stop hunt, then LTF break in market structure confirming it, then return to the OB that caused the BMS; SL beyond that OB/sweep; TP1 = the BMS swing (opposite liquidity).");
+  lines.push("    sms_bms_rto — failure swing (no new high/low), then BMS, then return to the OB; same SL/TP logic.");
+  lines.push("    bms_rto_ote — after a BMS, trade WITH it on the retrace into 50%/OTE (0.618–0.72) or the OB; SL beyond the swing origin.");
+  lines.push("    amd_distribution — Asian range accumulation, London/NY false move beyond it (manipulation), entry back the other way on RTO.");
+  lines.push("  4 Trigger not complete yet → WATCH and name the level + the trigger you are waiting for.");
+  lines.push(`  Confluence ≥${ctx.min_confluence}: htf_bias, htf_key_level, mtf_sr_zone, liquidity_sweep, bms, order_block_rto, fib_ote, asian_range, session_amd, london_open, ny_open, high_impact_news, plan_poi.`);
 
   if (ctx.mtf_zones) lines.push(formatMtfZonesForPrompt(ctx.mtf_zones));
 
-  lines.push("", "YOU set SL/TP from SNR + fib — not from config defaults.");
-  lines.push("- SL: beyond invalidation (below demand / above supply you cite)");
-  lines.push(`- TP: nearest SNR/fib levels${ctx.reach_pips != null ? ` within ${ctx.reach_pips}p` : ""} — provide tp_levels[] on propose_setup`);
+  lines.push("", "YOU set SL/TP from structure — not from config defaults.");
+  lines.push("- SL: beyond the sweep extreme / order block that invalidates the setup");
+  lines.push(`- TP: the opposite liquidity / BMS swing first, then the next pool${ctx.reach_pips != null ? ` — all within ${ctx.reach_pips}p` : ""}`);
   lines.push(`- Suggested plays: ${ctx.suggested_setups.length ? ctx.suggested_setups.join(", ") : "none — WATCH"}`);
 
   return lines.join("\n");
@@ -410,19 +439,19 @@ export function validateSMCSetup(args, ctx = null) {
   const raids = sideOfLiquidity(ctx?.liquidity_events);
 
   if (config.smc?.requireTradingWindow && ctx?.profile?.killzone_gate && !ctx.trading_window) {
-    const allowedOffHours = ["turtle_soup_long", "turtle_soup_short", "dip_reclaim_long", "dip_reclaim_short"].includes(setupType)
+    const allowedOffHours = ["turtle_soup_long", "turtle_soup_short", "sh_bms_rto"].includes(setupType)
       && (raids.ssl || raids.bsl);
     if (!allowedOffHours) {
-      return { ok: false, reason: "outside_trading_window", message: `Outside killzones (${ctx.trading_windows}) — WATCH unless turtle soup / dip reclaim after a liquidity raid` };
+      return { ok: false, reason: "outside_trading_window", message: `Outside killzones (${ctx.trading_windows}) — WATCH unless turtle soup / SH+BMS+RTO after a liquidity raid` };
     }
   }
 
   if (config.smc?.blockTrendFollowAtLiquidity !== false) {
     if (raids.ssl && !raids.bsl && args.side === "short") {
-      return { ok: false, reason: "ssl_swept_no_short", message: "Sell-side liquidity just taken — do not short into it; favor turtle_soup_long / RTO long / WATCH" };
+      return { ok: false, reason: "ssl_swept_no_short", message: "Sell-side liquidity just taken — do not short into it; favor turtle_soup_long / sh_bms_rto long / WATCH" };
     }
     if (raids.bsl && !raids.ssl && args.side === "long") {
-      return { ok: false, reason: "bsl_swept_no_long", message: "Buy-side liquidity just taken — do not chase long; favor turtle_soup_short / RTO short / WATCH" };
+      return { ok: false, reason: "bsl_swept_no_long", message: "Buy-side liquidity just taken — do not chase long; favor turtle_soup_short / sh_bms_rto short / WATCH" };
     }
   }
 

@@ -43,8 +43,10 @@ PREFETCH ACTIVE — SMC + MTF SNR map loaded above.
 
     return `${shared}
 
-ROLE: SCREENER — Smart Money / Market Structure (AMD sessions, liquidity, BOS + RTO).
-You are the trader. YOU decide entry, SL, and TP from SNR + fib + structure — not from config templates.
+ROLE: SCREENER — "Market Structure and Powerful Setups": HTF key levels, LTF triggers.
+You are the trader. YOU decide entry, SL and TP from structure — not from config templates.
+${context.trigger ? `\nTHIS CYCLE WAS TRIGGERED BY: ${context.trigger}\nJudge whether the trigger completes a setup right now, or what still has to happen.\n` : ""}
+${context.planSummary || ""}
 
 ${prefetchBlock}
 
@@ -53,63 +55,42 @@ ${context.calendarSummary || ""}
 OPEN SETUPS (do NOT call propose_setup if any listed):
 ${getSetupsSummary()}
 
-CORE LOGIC — walk this chain every cycle (long; mirror for short):
+HOW TO DECIDE (every cycle):
+1. Where is price relative to today's plan POIs and the HTF key levels (OB, liquidity pools)?
+   Not at a key level → WATCH (say which level you are waiting for).
+2. At a key level: has the LTF trigger completed?
+   - turtle_soup_long/short: pool swept (wick through SSL/BSL) and price back inside.
+   - sh_bms_rto: sweep → LTF BMS confirming it → price returning to the OB that caused the BMS.
+   - sms_bms_rto: failure swing → BMS → RTO.
+   - bms_rto_ote: BMS in the HTF direction → retrace into 50%/OTE or the OB.
+   - amd_distribution: Asian range → London/NY false move → back the other way on RTO.
+   Trigger not complete → WATCH (say what is missing). Never enter on a touch alone.
+3. Confirm with get_xauusd_mtf + get_xauusd_combined (momentum/RSI). Need ≥2 confluence.
+4. SETUP → propose_setup. If rejected, the response says why — fix that one thing (never by tightening SL) and retry, or WATCH.
+5. Final message starts with "SETUP", "WATCH" or "AVOID" + the reasoning. Price null or candle history unavailable → WATCH.
 
-  PRICE FALLS → IS THIS A DIP?
-       NO → WATCH/IGNORE
-       YES → STRUCTURE intact? (HTF trend + no BOS against bias)
-              NO → WATCH
-              YES → ABSORPTION at SNR/fib/OB? (wick, stall, volume character)
-                     NO → WAIT
-                     YES → SMART MONEY IN (not distribution out)
-                            NO → WAIT
-                            YES → RECLAIM key level confirmed?
-                                   NO → WAIT
-                                   YES → ENTRY
+ENTRY:
+- market: on the trigger candle / RTO now (entry within a few pips of live price).
+- limit: resting in the OB / OTE on the retrace side (long limit at/below price, short at/above).
 
-Use the prefetch for AMD session, BSL/SSL sweeps, turtle soup, BMS/RTO when they fit the chain.
-
-WORKFLOW (~4 tool calls):
-1. Walk DIP → ENTRY using prefetch SNR stack + fib levels + structure.
-2. get_xauusd_mtf + get_xauusd_combined — confirm momentum/RSI/news.
-3. SETUP / WATCH / AVOID. Price null or candle history unavailable → WATCH.
-4. SETUP → propose_setup with YOUR entry, sl, tp_levels. If it is rejected, the response says why —
-   fix that one thing (never by tightening SL) and retry, or WATCH.
-5. Finish with a final message starting with "SETUP", "WATCH" or "AVOID" plus the reasoning.
-
-ENTRY (SNR + Fib):
-- Prefer limit at fib 0.5–0.786 retrace into MTF support/resistance (OTE zone).
-  A limit must sit on the retrace side: long limit at/below price, short limit at/above price.
-- Or market on reclaim candle after absorption at demand/supply (entry within a few pips of live price).
-- snr_bounce_* = entry at MTF zone; fib_retrace = entry at fib level; dip_reclaim_* = full chain confirmed.
-
-TP / SL — structure-first (YOU define; width follows structure, not a pip template):
-- SL goes BEYOND the invalidation level — next support (long) or resistance (short), sweep wick, fib, or SNR from prefetch.
+SL / TP — structure-first:
+- SL beyond the sweep extreme / OB that invalidates the setup.
   ${mode.id} limits: SL ${mode.minSlPips ?? "?"}–${mode.maxSlPips ?? "?"} pips from entry. If invalidation is farther, the entry is too far from structure → WATCH.
   Never tighten SL just to improve RR.
-- TP: tp_levels at the NEAREST realistic SNR/fib targets, reachable within ${mode.setupMaxAgeMin ?? "?"} minutes — every TP ≤ ${mode.maxTpPips ?? "?"} pips from entry.
-  Final TP must give RR ≥ ${mode.minRrRatio ?? 1.2}. If the nearest level is too close → target the next one within the limit, or WATCH.
-  Do not target distant daily/weekly levels (PWL/PWH) on a ${mode.id} trade unless they are within the limit.
-- sl_anchor REQUIRED — one line why SL is there (structure name + level price).
-- Each tp_levels[].label REQUIRED — SNR/fib target name for that TP price.
-- reason = DIP→ENTRY thesis only (chain steps). Do NOT bury SL/TP labels inside reason.
-- If RR too low: extend TP to farther SNR/fib — NEVER move SL closer to entry.
+- TP: TP1 = the opposite liquidity / BMS swing, then the next pool — reachable within ${mode.setupMaxAgeMin ?? "?"} minutes, every TP ≤ ${mode.maxTpPips ?? "?"} pips from entry.
+  Final TP must give RR ≥ ${mode.minRrRatio ?? 1.2}. If the nearest target is too close → next one within the limit, or WATCH.
+- sl_anchor REQUIRED — structure name + level price. Each tp_levels[].label REQUIRED — the liquidity/level targeted.
+- reason = key level + trigger sequence you saw. Do NOT bury SL/TP labels inside reason.
 
 Example short (RR ≥ ${mode.minRrRatio ?? 1.2}):
-  entry 4395.71 | sl 4399.5 | sl_anchor: "above 1H high 4396.89 + sweep buffer"
-  tp_levels: [{ price: 4389.9, close_pct: 100, label: "MTF support / 4H demand" }]
-  reason: "DIP at 0.786 fib, MTF bearish -3, absorption at resistance stack..."
+  entry 4166.2 (market, RTO into 15m bearish OB) | sl 4170.9 | sl_anchor: "above 15m bearish OB 4170.4 / EQH sweep high"
+  tp_levels: [{ price: 4155.0, close_pct: 50, label: "PDL sell-side liquidity" }, { price: 4150.6, close_pct: 50, label: "Asian low SSL" }]
+  reason: "EQH 4169 swept at NY open, 5m BMS down below 4164, price back in the 15m bearish OB (plan P1)"
 
 propose_setup fields:
-- setup_type: dip_reclaim_long | dip_reclaim_short | fib_retrace | snr_bounce_long | snr_bounce_short | turtle_soup_* | sh_bms_rto | sms_bms_rto | amd_distribution
-- confluence_factors (≥2): htf_bias | snr_zone | fib_retrace | absorption | reclaim | mtf_sr_zone | liquidity_sweep | fib_ote | ltf_structure | order_block_rto | session_amd | london_open | ny_open | asian_range | news_catalyst
-- entry_style: market (reclaim now) | limit (fib/SNR retrace)
-- entry, sl, sl_anchor, tp_levels (price + label + close_pct), confidence, reason (thesis only)
-
-When to WATCH (not SETUP):
-- Chain broken at any step (no dip, structure broken, no absorption, no reclaim).
-- Chasing impulse without retrace to SNR/fib.
-- Weekend/stale price / no live quote.
+- setup_type: turtle_soup_long | turtle_soup_short | sh_bms_rto | sms_bms_rto | bms_rto_ote | amd_distribution
+- confluence_factors (≥2): htf_bias | htf_key_level | mtf_sr_zone | liquidity_sweep | bms | order_block_rto | fib_ote | asian_range | session_amd | london_open | ny_open | high_impact_news | plan_poi
+- entry_style, entry, sl, sl_anchor, tp_levels (price + label + close_pct), confidence, reason
 
 Session UTC: ${session} | AMD: ${getAMDPhase()}
 

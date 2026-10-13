@@ -14,3 +14,4 @@ logs/
 .DS_Store
 screening-log.json
 *.tmp
+plan-state.json

@@ -32,16 +32,20 @@ function groupBy(trades, keyFn) {
   return Object.fromEntries([...groups].map(([k, v]) => [k, summarize(v)]));
 }
 
-/** Filled trades of `modeId` resolved within the gate window. */
+/** Filled trades of `modeId` under the current strategy version, resolved within the gate window. */
 export function recentTrades(modeId, records = getPerformanceRecords(), now = Date.now()) {
   const windowDays = config.performanceGate?.windowDays ?? 60;
   const cutoff = now - windowDays * 24 * 60 * 60 * 1000;
-  return records.filter((r) => isTrade(r) && r.mode === modeId && Date.parse(r.resolved_at || r.recorded_at) >= cutoff);
+  return records.filter((r) => isTrade(r)
+    && r.mode === modeId
+    && r.strategy_version === config.strategyVersion
+    && Date.parse(r.resolved_at || r.recorded_at) >= cutoff);
 }
 
 export function buildPerformanceStats(trades) {
   return {
     overall: summarize(trades),
+    by_grade: groupBy(trades, (t) => t.grade),
     by_setup_type: groupBy(trades, (t) => t.setup_type),
     by_session: groupBy(trades, (t) => t.session),
     by_side: groupBy(trades, (t) => t.side),
@@ -89,11 +93,12 @@ function formatGroup(title, group, minN) {
 export function formatPerformanceStats(modeId) {
   const trades = recentTrades(modeId);
   const days = config.performanceGate?.windowDays ?? 60;
-  if (!trades.length) return `Track record (${modeId}, ${days}d): no filled trades yet.`;
+  if (!trades.length) return `Track record (${modeId}, ${config.strategyVersion}, ${days}d): no filled trades yet.`;
   const s = buildPerformanceStats(trades);
   const o = s.overall;
   return [
-    `Track record (${modeId}, last ${days}d): ${o.n} trades, ${o.win_rate}% win, avg ${o.avg_pips}p, net ${o.net_pips}p`,
+    `Track record (${modeId}, ${config.strategyVersion}, last ${days}d): ${o.n} trades, ${o.win_rate}% win, avg ${o.avg_pips}p, net ${o.net_pips}p`,
+    ...formatGroup("By grade (A = plan POI, B = off-plan)", s.by_grade, 1),
     ...formatGroup("By setup type", s.by_setup_type, 1),
     ...formatGroup("By session", s.by_session, 2),
     ...formatGroup("By side", s.by_side, 2),

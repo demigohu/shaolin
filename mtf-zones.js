@@ -33,13 +33,20 @@ export function extractPivotLevels(sr) {
 export function extractExtraLevels(extras) {
   const levels = [];
   const add = (price, kind, label, weight, source) => {
-    if (Number.isFinite(price) && price > 0) levels.push({ price, kind, label, tf: source === "asian" ? "session" : "1D", weight, source });
+    if (Number.isFinite(price) && price > 0) levels.push({ price, kind, label, tf: source === "session" ? "1D" : source, weight, source });
   };
-  const { pdh, pdl, pwh, pwl, asian } = extras || {};
-  add(pdh, "resistance", "PDH", 5, "session");
-  add(pdl, "support", "PDL", 5, "session");
+  const { pdh, pdl, pwh, pwl, pmh, pml, hod, lod, equal, asian } = extras || {};
+  add(pmh, "resistance", "PMH", 6, "session");
+  add(pml, "support", "PML", 6, "session");
   add(pwh, "resistance", "PWH", 5, "session");
   add(pwl, "support", "PWL", 5, "session");
+  add(pdh, "resistance", "PDH", 5, "session");
+  add(pdl, "support", "PDL", 5, "session");
+  add(hod, "resistance", "HOD", 3, "session");
+  add(lod, "support", "LOD", 3, "session");
+  for (const e of equal || []) {
+    add(e.price, e.kind === "eqh" ? "resistance" : "support", `${e.kind.toUpperCase()} ${e.tf}`, 4, "liquidity");
+  }
   add(asian?.high, "resistance", "Asian high", 4, "asian");
   add(asian?.low, "support", "Asian low", 4, "asian");
   return levels;
@@ -158,7 +165,7 @@ export function formatMtfZonesForPrompt(stack) {
   if (!stack || stack.disabled) return "";
   const lines = [
     "",
-    `── MTF S/R ZONE STACK (fractal swings ${(stack.timeframes || []).join("/")} + PDH/PDL/PWH/PWL/Asian + monthly pivots) ──`,
+    `── MTF S/R ZONE STACK (fractal swings ${(stack.timeframes || []).join("/")} + PMH/PML, PWH/PWL, PDH/PDL, HOD/LOD, EQH/EQL, Asian + monthly pivots) ──`,
     `Price: ${stack.price ?? "?"} | HTF bias: ${stack.htf_bias}${stack.reach_pips != null ? ` | levels within ±${stack.reach_pips}p (trade reach)` : ""}`,
   ];
   if (!stack.candles_available) {

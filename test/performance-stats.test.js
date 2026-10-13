@@ -7,24 +7,25 @@ import { buildPerformanceStats, checkTrackRecord, recentTrades } from "../perfor
 config.performanceGate = { enabled: true, windowDays: 60, minTrades: 5, maxWinRate: 30 };
 const now = Date.now();
 const trade = (setup_type, session, pnl, extra = {}) => ({
-  mode: "scalp", setup_type, session, side: "long", pnl_pips: pnl, filled: true, outcome: pnl > 0 ? "tp_hit" : "sl_hit",
+  mode: "scalp", strategy_version: config.strategyVersion, setup_type, session, side: "long", pnl_pips: pnl, filled: true, outcome: pnl > 0 ? "tp_hit" : "sl_hit",
   confluence_factors: ["htf_bias"], resolved_at: new Date(now - 60_000).toISOString(), ...extra,
 });
 
 test("recentTrades keeps filled trades of the mode inside the window", () => {
   const rows = [
-    trade("fib_retrace", "london", 10),
-    trade("fib_retrace", "london", 0, { filled: false, outcome: "stale_no_fill" }),
-    trade("fib_retrace", "london", 10, { mode: "swing" }),
-    trade("fib_retrace", "london", 10, { resolved_at: new Date(now - 90 * 864e5).toISOString() }),
+    trade("bms_rto_ote", "london", 10),
+    trade("bms_rto_ote", "london", 0, { filled: false, outcome: "stale_no_fill" }),
+    trade("bms_rto_ote", "london", 10, { mode: "swing" }),
+    trade("bms_rto_ote", "london", 10, { resolved_at: new Date(now - 90 * 864e5).toISOString() }),
+    trade("bms_rto_ote", "london", 10, { strategy_version: "v0-old" }),
   ];
   assert.equal(recentTrades("scalp", rows, now).length, 1);
 });
 
 test("stats group by setup type, session and confluence tag", () => {
-  const s = buildPerformanceStats([trade("fib_retrace", "london", 20), trade("fib_retrace", "asian", -10)]);
-  assert.deepEqual(s.by_setup_type.fib_retrace, { n: 2, wins: 1, win_rate: 50, net_pips: 10, avg_pips: 5 });
-  assert.equal(s.by_type_session["fib_retrace@asian"].n, 1);
+  const s = buildPerformanceStats([trade("bms_rto_ote", "london", 20), trade("bms_rto_ote", "asian", -10)]);
+  assert.deepEqual(s.by_setup_type.bms_rto_ote, { n: 2, wins: 1, win_rate: 50, net_pips: 10, avg_pips: 5 });
+  assert.equal(s.by_type_session["bms_rto_ote@asian"].n, 1);
   assert.equal(s.by_confluence.htf_bias.n, 2);
 });
 
@@ -41,8 +42,8 @@ test("losing setup type in a session is blocked; other sessions are not", () => 
 });
 
 test("too few trades or net positive → not blocked", () => {
-  const few = Array.from({ length: 4 }, () => trade("fib_retrace", "asian", -10));
-  assert.equal(checkTrackRecord({ setup_type: "fib_retrace", session: "asian", mode: "scalp" }, few).ok, true);
-  const bigWinner = [...Array.from({ length: 4 }, () => trade("fib_retrace", "asian", -10)), trade("fib_retrace", "asian", 100)];
-  assert.equal(checkTrackRecord({ setup_type: "fib_retrace", session: "asian", mode: "scalp" }, bigWinner).ok, true);
+  const few = Array.from({ length: 4 }, () => trade("bms_rto_ote", "asian", -10));
+  assert.equal(checkTrackRecord({ setup_type: "bms_rto_ote", session: "asian", mode: "scalp" }, few).ok, true);
+  const bigWinner = [...Array.from({ length: 4 }, () => trade("bms_rto_ote", "asian", -10)), trade("bms_rto_ote", "asian", 100)];
+  assert.equal(checkTrackRecord({ setup_type: "bms_rto_ote", session: "asian", mode: "scalp" }, bigWinner).ok, true);
 });

@@ -81,7 +81,7 @@ export const tools = [
     type: "function",
     function: {
       name: "propose_setup",
-      description: "Log setup with YOUR entry, SL, and tp_levels from SNR/fib/structure. Walk DIP→ENTRY chain before calling.",
+      description: "Log a setup once its trigger is complete (sweep / BMS / RTO at an HTF key level). YOU set entry, SL and tp_levels from structure.",
       parameters: {
         type: "object",
         properties: {
@@ -112,26 +112,20 @@ export const tools = [
           confidence: { type: "number", description: "0-100; below the mode's minConfidence is rejected" },
           setup_type: {
             type: "string",
-            enum: [
-              "dip_reclaim_long", "dip_reclaim_short",
-              "fib_retrace", "snr_bounce_long", "snr_bounce_short",
-              "turtle_soup_long", "turtle_soup_short",
-              "sh_bms_rto", "sms_bms_rto", "amd_distribution",
-            ],
+            enum: ["turtle_soup_long", "turtle_soup_short", "sh_bms_rto", "sms_bms_rto", "bms_rto_ote", "amd_distribution"],
           },
           confluence_factors: {
             type: "array",
             items: {
               type: "string",
               enum: [
-                "htf_bias", "ltf_structure", "snr_zone", "fib_retrace", "absorption", "reclaim",
-                "liquidity_sweep", "order_block_rto", "fib_ote", "london_open", "ny_open",
-                "asian_range", "session_amd", "news_catalyst", "mtf_sr_zone",
+                "htf_bias", "htf_key_level", "mtf_sr_zone", "liquidity_sweep", "bms", "order_block_rto", "fib_ote",
+                "asian_range", "session_amd", "london_open", "ny_open", "high_impact_news", "plan_poi",
               ],
             },
           },
           bias: { type: "string" },
-          reason: { type: "string", description: "Required: DIP→ENTRY thesis (chain analysis). SL/TP structure goes in sl_anchor + tp_levels[].label — not here." },
+          reason: { type: "string", description: "Required: the HTF key level and the trigger sequence you saw (e.g. 'PDL swept, 5m BMS up, RTO into 15m bullish OB'). SL/TP structure goes in sl_anchor + tp_levels[].label." },
           thesis_id: { type: "string", description: "Short human-readable thesis label" },
           entry_style: {
             type: "string",

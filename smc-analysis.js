@@ -3,6 +3,7 @@
  * fractal swings, previous-day H/L, Asian range, BOS, order blocks, fib OTE.
  */
 
+import { config } from "./config.js";
 import { toPips } from "./tools/price.js";
 import { getAsianWindowUtc } from "./smc-sessions.js";
 
@@ -183,4 +184,63 @@ export function inferStructureBias(entries) {
   if (mid === "Bearish" && low === "Bullish") bms_hint = "potential_bullish_bms_on_ltf";
 
   return { bias, bms_hint, alignment: Object.fromEntries(entries.map(([tf], i) => [tf, trends[i]])) };
+}
+
+/** Previous calendar month's H/L from daily bars (UTC months). */
+export function previousMonthHL(d1, now = Date.now()) {
+  if (!d1?.length) return { pmh: null, pml: null };
+  const n = new Date(now);
+  const thisMonth = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), 1);
+  const lastMonth = Date.UTC(n.getUTCFullYear(), n.getUTCMonth() - 1, 1);
+  const bars = d1.filter((k) => k.t >= lastMonth && k.t < thisMonth);
+  if (!bars.length) return { pmh: null, pml: null };
+  return { pmh: Math.max(...bars.map((k) => k.h)), pml: Math.min(...bars.map((k) => k.l)) };
+}
+
+/** Start of the current gold trading day: 18:00 New York time (DST-aware via offsetHours). */
+export function tradingDayStart(now, nyOffsetHours) {
+  const d = new Date(now);
+  let start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 18 - nyOffsetHours);
+  while (start > now) start -= 24 * 3_600_000;
+  return start;
+}
+
+/** High/low of the current trading day so far (HOD/LOD). */
+export function dayHighLow(candles, dayStart) {
+  const bars = (candles || []).filter((k) => k.t >= dayStart);
+  if (!bars.length) return { hod: null, lod: null };
+  return { hod: Math.max(...bars.map((k) => k.h)), lod: Math.min(...bars.map((k) => k.l)) };
+}
+
+/**
+ * Equal highs / equal lows ("retail" resistance/support = resting liquidity):
+ * two or more fractal swings within `tolPips` that price has not traded through since.
+ */
+export function equalLevels(candles, tolPips, lookback = 96) {
+  const tol = tolPips * (config.broker.pipSize || 0.1);
+  const win = (candles || []).slice(-lookback);
+  const { highs, lows } = findFractals(win);
+  const out = [];
+  const cluster = (points, kind) => {
+    const used = new Set();
+    for (let i = 0; i < points.length; i++) {
+      if (used.has(i)) continue;
+      const group = [points[i]];
+      for (let j = i + 1; j < points.length; j++) {
+        if (!used.has(j) && Math.abs(points[j].price - points[i].price) <= tol) {
+          group.push(points[j]);
+          used.add(j);
+        }
+      }
+      if (group.length < 2) continue;
+      const level = kind === "eqh" ? Math.max(...group.map((g) => g.price)) : Math.min(...group.map((g) => g.price));
+      const lastIdx = Math.max(...group.map((g) => g.i));
+      const after = win.slice(lastIdx + 1);
+      const taken = kind === "eqh" ? after.some((k) => k.h > level + tol) : after.some((k) => k.l < level - tol);
+      if (!taken) out.push({ kind, price: level, touches: group.length });
+    }
+  };
+  cluster(highs, "eqh");
+  cluster(lows, "eql");
+  return out;
 }

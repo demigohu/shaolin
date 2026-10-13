@@ -30,6 +30,19 @@ XAUUSD agent: screening → auto-log setup → monitor → lessons.
 
 Yahoo's COMEX quote lags about 10 minutes, so the basis is measured at a shared instant: the TradingView 1h/15m bar open vs the Yahoo 5m candle with the same timestamp. During the first ~10 minutes of an hour the last measurement is reused. The management price never falls back to Yahoo: it is delayed futures data, and SL/TP tracking pauses instead.
 
+## Daily plan → watcher → screener (PDF: "HTF Analysis, LTF Entries")
+
+1. **Plan** (`planner.js`) at `plan.times` WIB (default 06:30 / 13:30 / 18:30, Mon–Fri), on startup if none, and after invalidation (`replanCooldownMin`). The `llm.planningModel` reads a higher-timeframe structure view (scalp plans on the day profile) + the calendar and returns bias, invalidation levels and ≤5 POIs (zone, side, setups, trigger, targets). Saved in `plan-state.json` and pushed to Telegram; expires at the end of the trading day (18:00 New York).
+2. **Watcher** (`watcher.js`, every `watcher.intervalSec`, no LLM): voids the plan when price trades through its invalidation (and re-plans), and fires a screening when price reaches a POI or sweeps a liquidity pool (Asian / PD / PW / equal highs-lows), with a per-trigger cooldown.
+3. **Screener** runs on those triggers plus every `screeningIntervalMin`. The prompt carries the plan and the trigger; setups follow the PDF triggers only.
+4. **Grading** in `propose_setup`: **A** = entry inside a POI on its side (`plan_poi` added), **B** = off-plan (needs `plan.offPlanMinConfidence` and `offPlanMinConfluence`), **unplanned** = no active plan.
+
+Setups carry `strategy_version`, `grade`, `poi_id`, `plan_id`; `/stats` only counts the current `strategyVersion` and splits by grade.
+
+## Setup types (PDF)
+
+`turtle_soup_long/short` (sweep → back inside), `sh_bms_rto` (stop hunt → BMS → return to OB), `sms_bms_rto` (failure swing → BMS → RTO), `bms_rto_ote` (with the BMS on the 50%/OTE/OB retrace), `amd_distribution` (Asian range → London/NY false move → reverse). Liquidity pools: PDH/PDL, PWH/PWL, PMH/PML, Asian H/L, equal highs/lows, HOD/LOD.
+
 ## Structure per mode (`STRUCTURE_PROFILES` in `smc.js`)
 
 | Mode | Trend TFs | Swing / fib | BOS / OB | Zone TFs | Liquidity pools | Killzone gate |
@@ -58,7 +71,7 @@ Zone merge/proximity distance defaults to 8/5, 15/10 and 40/25 pips respectively
 
 ## propose_setup gates (in order)
 
-news blackout → confidence ≥ `mode.minConfidence` → RSI extreme (trend setups only) → SMC (setup type, confluence, trading window, no shorting into a fresh SSL raid / no longing into a BSL raid) → entry vs live price (market within slippage; limit on the retrace side and within `maxLimitEntryPips`) → SL (side; structure checks when `llmOwnsTpSl=false`) → TP side → reason / `sl_anchor` / TP labels → min RR → book-keeping (one open setup per side, thesis cooldown, daily cap).
+news blackout → confidence ≥ `mode.minConfidence` → RSI extreme (`bms_rto_ote` only) → SMC (setup type, confluence, trading window, no shorting into a fresh SSL raid / no longing into a BSL raid) → entry vs live price (market within slippage; limit on the retrace side and within `maxLimitEntryPips`) → SL (side; structure checks when `llmOwnsTpSl=false`) → TP side → reason / `sl_anchor` / TP labels → min RR → plan grade (A / B / unplanned) → book-keeping (one open setup per side, thesis cooldown, daily cap).
 
 ## Persistent files
 

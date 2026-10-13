@@ -30,6 +30,16 @@ async function main() {
         console.log(getSetupMemorySummary(10));
       }
       break;
+    case "plan": {
+      const { getActivePlan, formatPlanMessage } = await import("./planner.js");
+      console.log(formatPlanMessage(getActivePlan()));
+      break;
+    }
+    case "replan": {
+      const { createPlan, formatPlanMessage } = await import("./planner.js");
+      console.log(formatPlanMessage(await createPlan({ reason: "manual (cli)" })));
+      break;
+    }
     case "calendar": {
       const { getCalendarEvents, upcomingEvents, formatEvent } = await import("./tools/calendar.js");
       const evs = upcomingEvents(await getCalendarEvents(), Date.now(), 24 * 7);
@@ -66,6 +76,8 @@ async function main() {
   node cli.js memory [fp] Thesis memory (or one fingerprint)
   node cli.js stats       Track record by setup type / session
   node cli.js calendar    High-impact USD events this week
+  node cli.js plan        Today's plan
+  node cli.js replan      Build a new plan now (uses the planning model)
   node cli.js telegram-test  Test Telegram bot + send ping
   npm run mcp:smoke       MCP smoke test
 `);

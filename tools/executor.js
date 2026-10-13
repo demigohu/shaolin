@@ -5,6 +5,8 @@ import { getActiveMode, getCurrentSession } from "../modes.js";
 import { recallForThesis } from "../setup-memory.js";
 import { recordSetupOutcome } from "../lessons.js";
 import { checkTrackRecord } from "../performance-stats.js";
+import { getActivePlan, gradeSetup } from "../planner.js";
+import { config } from "../config.js";
 import { getCalendarEvents, checkNewsBlackout, formatCalendarForPrompt, upcomingEvents } from "./calendar.js";
 import { stageSignals, getAndClearStagedSignals, extractSignalsFromMtf, extractSignalsFromCombined } from "../signal-tracker.js";
 import { buildSMCContext, validateSMCSetup, getLastSMCContext, formatSMCForPrompt } from "../smc.js";
@@ -59,6 +61,17 @@ async function proposeSetup(args) {
     if (!check.ok) return blocked(check, args);
   }
 
+  // Plan grading: A at a POI on its side, B off-plan (stricter), "unplanned" without a plan.
+  const grade = gradeSetup(args, getActivePlan(), mode, smcCheck.confluence || []);
+  if (!grade.ok) return blocked(grade, args);
+  // plan_poi is only true when the setup actually sits at a POI.
+  const confluence = (smcCheck.confluence || []).filter((c) => c !== "plan_poi");
+  if (grade.grade === "A") confluence.push("plan_poi");
+  const minConf = config.smc?.minConfluence ?? 2;
+  if (confluence.length < minConf) {
+    return blocked({ reason: "insufficient_confluence", message: `plan_poi only counts at a plan POI — ${confluence.length} valid confluence factors, need ≥${minConf}.` }, args);
+  }
+
   const screeningSnapshot = {
     ...staged,
     rsi,
@@ -70,7 +83,10 @@ async function proposeSetup(args) {
     ...args,
     tp_levels: tpCheck.tp_levels ?? args.tp_levels,
     setup_type: smcCheck.setup_type || args.setup_type,
-    confluence_factors: smcCheck.confluence || args.confluence_factors,
+    confluence_factors: confluence,
+    grade: grade.grade,
+    poi_id: grade.poi_id ?? null,
+    plan_id: grade.plan_id ?? null,
     session: getCurrentSession(),
     screening_snapshot: screeningSnapshot,
     entry_style: entryCheck.entry_style,

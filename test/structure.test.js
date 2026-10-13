@@ -140,3 +140,21 @@ test("toHeadlines drops stale/undated articles and sorts newest first", async ()
   assert.deepEqual(items.map((h) => [h.title, h.age_min]), [["Gold hits session high", 10], ["Gold slips as dollar firms", 30]]);
   assert.equal(marketauxDate(now), "2026-10-13T13:00");
 });
+
+test("previous month, trading-day HOD/LOD and equal highs/lows", async () => {
+  const { previousMonthHL, tradingDayStart, dayHighLow, equalLevels } = await import("../smc-analysis.js");
+  const d1 = [candle(Date.parse("2026-09-10T04:00:00Z"), 1, 4300, 4100, 1), candle(Date.parse("2026-09-25T04:00:00Z"), 1, 4250, 4050, 1), candle(Date.parse("2026-10-02T04:00:00Z"), 1, 4400, 4000, 1)];
+  assert.deepEqual(previousMonthHL(d1, Date.parse("2026-10-13T10:00:00Z")), { pmh: 4300, pml: 4050 });
+
+  // EDT (-4): trading day starts 22:00 UTC the previous evening.
+  const start = tradingDayStart(Date.parse("2026-10-13T10:00:00Z"), -4);
+  assert.equal(new Date(start).toISOString(), "2026-10-12T22:00:00.000Z");
+  const intraday = [candle(start - 3_600_000, 1, 999, 1, 1), candle(start + 3_600_000, 1, 10, 5, 1), candle(start + 7_200_000, 1, 12, 4, 1)];
+  assert.deepEqual(dayHighLow(intraday, start), { hod: 12, lod: 4 });
+
+  // Two swing highs at 2010.0 and 2010.4 (4 pips apart) → equal highs, untouched since.
+  const hs = [2000, 2005, 2010, 2004, 2001, 2003, 2010.4, 2006, 2002, 2003, 2004];
+  const ks = hs.map((h, i) => candle(i, h - 1, h, h - 2, h - 0.5));
+  const eq = equalLevels(ks, 10);
+  assert.deepEqual(eq.filter((e) => e.kind === "eqh").map((e) => [e.price, e.touches]), [[2010.4, 2]]);
+});

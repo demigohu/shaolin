@@ -1,18 +1,8 @@
 import { config } from "../config.js";
 import { roundToPips, toPips, normalizeTpLevels, computeRrRatio } from "./price.js";
-import { sideOfLiquidity } from "../smc.js";
+import { sideOfLiquidity, SETUP_TYPES, REVERSAL_SETUPS } from "../smc.js";
 
-const STRUCTURE_SL_SETUPS = new Set([
-  "dip_reclaim_long",
-  "dip_reclaim_short",
-  "fib_retrace",
-  "snr_bounce_long",
-  "snr_bounce_short",
-  "turtle_soup_long",
-  "turtle_soup_short",
-  "sh_bms_rto",
-  "sms_bms_rto",
-]);
+const STRUCTURE_SL_SETUPS = new Set(SETUP_TYPES);
 
 const pipSize = () => config.broker.pipSize || 0.1;
 
@@ -54,18 +44,17 @@ export function validateConfidence(args, mode) {
   return { ok: true };
 }
 
-/** Block trend-chasing into extreme RSI (reversal setups are exempt). */
+/** Block trend-continuation entries into extreme RSI (liquidity-reversal setups are exempt). */
 export function validateRsi(args, rsi) {
   if (config.screening?.blockExtremeRsi === false || typeof rsi !== "number") return { ok: true };
   const noShort = config.screening.rsiNoShortBelow ?? 35;
   const noLong = config.screening.rsiNoLongAbove ?? 65;
-  const reversal = String(args.setup_type || "").startsWith("turtle_soup");
-  if (reversal) return { ok: true };
+  if (REVERSAL_SETUPS.has(args.setup_type)) return { ok: true };
   if (args.side === "short" && rsi < noShort) {
-    return { ok: false, reason: "rsi_oversold_no_short", message: `RSI ${rsi.toFixed(1)} oversold — no trend short (bounce risk). Turtle soup long or WATCH.` };
+    return { ok: false, reason: "rsi_oversold_no_short", message: `RSI ${rsi.toFixed(1)} oversold — no continuation short (bounce risk). Wait for a sweep + BMS (turtle soup / SH+BMS+RTO) or WATCH.` };
   }
   if (args.side === "long" && rsi > noLong) {
-    return { ok: false, reason: "rsi_overbought_no_long", message: `RSI ${rsi.toFixed(1)} overbought — no trend long. Turtle soup short or WATCH.` };
+    return { ok: false, reason: "rsi_overbought_no_long", message: `RSI ${rsi.toFixed(1)} overbought — no continuation long. Wait for a sweep + BMS (turtle soup / SH+BMS+RTO) or WATCH.` };
   }
   return { ok: true };
 }
@@ -158,7 +147,7 @@ export function validateSetupReason(args) {
   const slAnchor = String(args.sl_anchor || "").trim();
 
   if (reason.length < 50) {
-    return { ok: false, reason: "reason_too_short", message: "reason must explain DIP→ENTRY thesis (≥50 chars). SL/TP structure goes in sl_anchor + tp_levels[].label." };
+    return { ok: false, reason: "reason_too_short", message: "reason must explain the setup: HTF key level + trigger sequence (sweep / BMS / RTO) (≥50 chars). SL/TP structure goes in sl_anchor + tp_levels[].label." };
   }
   if (slAnchor.length < 12) {
     return { ok: false, reason: "sl_anchor_required", message: 'sl_anchor required — e.g. "above 1H high 4396.89 + buffer" or "below PDL sweep 4345".' };

@@ -18,7 +18,7 @@ function getToolsForRole(agentType) {
 
 let client = null;
 
-function getClient() {
+export function getClient() {
   if (client) return client;
   const apiKey = process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error("No LLM API key — set LLM_API_KEY (or OPENROUTER_API_KEY) in .env");

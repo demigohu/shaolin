@@ -131,7 +131,7 @@ export function formatSetupAlert(setup) {
   return [
     "🥋 SHAOLIN SETUP",
     "━━━━━━━━━━━━━━━",
-    `${setup.symbol} ${setup.side.toUpperCase()} | ${setup.mode}`,
+    `${setup.symbol} ${setup.side.toUpperCase()} | ${setup.mode}${setup.grade ? ` | ${setup.grade === "A" ? `A-grade (plan ${setup.poi_id})` : setup.grade === "B" ? "B-grade (off-plan)" : "no plan"}` : ""}`,
     setup.setup_type ? `Type: ${setup.setup_type}` : null,
     styleLine,
     setup.confluence_factors?.length ? `Confluence: ${setup.confluence_factors.join(", ")}` : null,

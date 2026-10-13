@@ -33,6 +33,8 @@ node cli.js cancel all|<id> # cancel setups
 node cli.js memory [fp]     # thesis history
 node cli.js stats           # track record by setup type / session
 node cli.js calendar        # high-impact USD events this week
+node cli.js plan            # today's plan
+node cli.js replan          # rebuild the plan now (planning model)
 node cli.js telegram-test   # send a Telegram ping
 ```
 
@@ -46,6 +48,8 @@ node cli.js telegram-test   # send a Telegram ping
 /cancel all|<id> Cancel setups
 /stats           Track record by setup type / session / side
 /calendar        High-impact USD events this week
+/plan            Today's plan (bias, POIs, triggers)
+/replan          Rebuild the plan now
 /memory          Thesis history
 /mode scalp      Switch mode (scalp|day|swing, saved to user-config.json)
 /help
@@ -61,6 +65,10 @@ Edit `user-config.json` (created from `user-config.example.json`):
 - `broker.pipSize`: 0.1 for 2-digit gold (1 pip = 10 cents)
 - `broker.priceOffset`: feed vs broker quote difference (display only)
 - `screening.*`: entry distance, RSI and RR gates
+- `llm.planningModel` / `llm.screeningModel`: one model per role (a strong model for planning, a reliable tool-caller for screening)
+- `plan.*`: daily plan times (WIB), off-plan B-grade requirements
+- `watcher.*`: 1-minute POI / liquidity-sweep trigger
+- `strategyVersion`: bump when rules change — stats only count the current version
 - `calendar.*`: news blackout around high-impact releases (Forex Factory feed), `blackoutBeforeMin` / `blackoutAfterMin`
 - `performanceGate.*`: auto-block setup types with a losing record (≥ minTrades, win rate ≤ maxWinRate, net < 0)
 

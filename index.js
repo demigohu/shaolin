@@ -23,7 +23,9 @@ import {
 } from "./notifications.js";
 import { sendMessage, startPolling, isEnabled as telegramEnabled, getTelegramStatus } from "./telegram.js";
 import { closeMcp } from "./tools/mcp-client.js";
-import { getManagementPrice } from "./tools/market.js";
+import { getManagementPrice, fetchAnalysis, extractPriceFromAnalysis } from "./tools/market.js";
+import { getActivePlan, createPlan, checkPlanInvalidation, formatPlanForPrompt, formatPlanMessage } from "./planner.js";
+import { detectTriggers, poolsFromContext } from "./watcher.js";
 import { formatAgentStatus } from "./status.js";
 import { formatPerformanceStats } from "./performance-stats.js";
 import { getSetupMemorySummary } from "./setup-memory.js";
@@ -37,6 +39,11 @@ let _mgmtCycleCount = 0;
 let _screenCycleCount = 0;
 let cronTasks = [];
 let fastMgmtTimer = null;
+let watcherTimer = null;
+let _planningBusy = false;
+let _lastPlanAt = 0;
+let _lastScreeningAt = 0;
+const _firedTriggers = new Map();
 
 export function syncFastManagementTimer() {
   const open = getOpenSetups();
@@ -84,12 +91,13 @@ function classifyAction(content) {
   return /\bAVOID\b/i.test(content || "") ? "AVOID" : "WATCH";
 }
 
-export async function runScreeningCycle({ silent = false } = {}) {
+export async function runScreeningCycle({ silent = false, trigger = null } = {}) {
   if (_screeningBusy) {
     log("screen", "Screening skipped — previous cycle still running");
     return "Screening already running.";
   }
   _screeningBusy = true;
+  _lastScreeningAt = Date.now();
   _screenCycleCount += 1;
   const mode = getActiveMode();
   const notify = config.notifications?.enabled !== false && !silent;
@@ -154,16 +162,21 @@ export async function runScreeningCycle({ silent = false } = {}) {
     }
 
     const goal = [
-      `Run XAUUSD ${mode.label} screening — DIP→ENTRY framework.`,
-      "Use prefetch SNR + fib. YOU set entry, SL, tp_levels from structure.",
-      "Walk: DIP → structure intact → absorption → reclaim → SETUP, else WATCH.",
+      `Run XAUUSD ${mode.label} screening.`,
+      trigger ? `Triggered by: ${trigger}.` : "Periodic check.",
+      "Is price at a plan POI / HTF key level, and has the LTF trigger (sweep / BMS / RTO) completed? SETUP only if yes, else WATCH with what you are waiting for.",
     ].join(" ");
 
     const onToolStart = ({ name, args }) => {
       if (!silent && args && Object.keys(args).length) log("tool", `${name}(${JSON.stringify(args)})`);
     };
     let { content, messages } = await agentLoop(goal, config.llm.maxSteps, "SCREENER", config.llm.screeningModel, {
-      context: { prefetchSummary: smcSummary, calendarSummary: formatCalendarForPrompt(calendarEvents) },
+      context: {
+        prefetchSummary: smcSummary,
+        calendarSummary: formatCalendarForPrompt(calendarEvents),
+        planSummary: formatPlanForPrompt(getActivePlan(), getLastSMCContext()?.price),
+        trigger,
+      },
       onToolStart,
     });
     content = cleanContent(content);
@@ -319,6 +332,76 @@ export async function runManagementCycle({ silent = false, forceDigest = false, 
   }
 }
 
+/** Build today's plan and push it to Telegram. */
+export async function runPlanning(reason = "scheduled") {
+  if (config.plan?.enabled === false || _planningBusy) return null;
+  if (config.screening?.skipWeekends !== false && isWeekendMarketClosed()) return null;
+  _planningBusy = true;
+  _lastPlanAt = Date.now();
+  try {
+    const plan = await createPlan({ reason });
+    if (config.plan?.notifyTelegram !== false) {
+      await sendMessage(formatPlanMessage(plan, formatCalendarForPrompt(await getCalendarEvents())));
+    }
+    return plan;
+  } catch (error) {
+    log("plan_error", error.message);
+    if (config.plan?.notifyTelegram !== false && shouldNotifyTelegram("plan_error", 120)) {
+      await sendMessage(`⚠️ Planner failed: ${error.message}\nScreening continues without a plan (normal rules).`);
+    }
+    return null;
+  } finally {
+    _planningBusy = false;
+  }
+}
+
+/**
+ * Every minute, without the LLM: void the plan if price broke its invalidation
+ * (re-plan), and fire a screening when price reaches a POI or sweeps a pool.
+ */
+async function runWatcher() {
+  if (config.watcher?.enabled === false) return;
+  if (config.screening?.skipWeekends !== false && isWeekendMarketClosed()) return;
+  const mode = getActiveMode();
+  if (!isSessionAllowed(mode)) return;
+
+  const m5 = await fetchAnalysis("5m", { maxAgeMs: 50_000 });
+  const m15 = await fetchAnalysis("15m", { maxAgeMs: 50_000 });
+  const price = extractPriceFromAnalysis(m5);
+  if (price == null) return;
+
+  const invalidated = checkPlanInvalidation(price);
+  if (invalidated) {
+    if (config.plan?.notifyTelegram !== false) await sendMessage(`🗺 Plan invalidated — ${invalidated}. Re-planning…`);
+    if (Date.now() - _lastPlanAt > (config.plan?.replanCooldownMin ?? 60) * 60_000) {
+      runPlanning(`re-plan: ${invalidated}`).catch((e) => log("plan_error", e.message));
+    }
+  }
+
+  if (_screeningBusy || getOpenSetups().length) return;
+  if (Date.now() - _lastScreeningAt < (config.watcher?.minGapMin ?? 3) * 60_000) return;
+
+  const ctx = getLastSMCContext();
+  const triggers = detectTriggers({
+    price,
+    bar: { high: Number(m15?.price_data?.high), low: Number(m15?.price_data?.low) },
+    pois: getActivePlan()?.pois || [],
+    pools: poolsFromContext(ctx),
+    proximityPips: mode.entryZonePips ?? 5,
+    lastFired: _firedTriggers,
+    cooldownMs: (config.watcher?.cooldownMin ?? 30) * 60_000,
+  });
+  if (!triggers.length) return;
+
+  for (const t of triggers) _firedTriggers.set(t.key, Date.now());
+  const text = triggers.map((t) => t.text).join("; ");
+  log("watcher", `Trigger: ${text}`);
+  if (config.watcher?.notifyPoiTouch !== false && triggers.some((t) => t.kind === "poi")) {
+    await sendMessage(`📍 ${triggers.filter((t) => t.kind === "poi").map((t) => t.text).join("\n")}\nScreening for a trigger now…`);
+  }
+  await runScreeningCycle({ trigger: text });
+}
+
 export function startCronJobs() {
   cronTasks.forEach((t) => t.stop());
   cronTasks = [];
@@ -333,7 +416,24 @@ export function startCronJobs() {
     runManagementCycle().catch((e) => log("cron_error", e.message));
   }));
 
-  log("cron", `Started — screening ${screeningIntervalMin}m, management ${managementIntervalMin}m [${config.activeMode}]`);
+  if (config.plan?.enabled !== false) {
+    for (const time of config.plan?.times ?? []) {
+      const [h, m] = String(time).split(":").map(Number);
+      if (!Number.isInteger(h) || !Number.isInteger(m)) continue;
+      cronTasks.push(cron.schedule(`${m} ${h} * * 1-5`, () => {
+        runPlanning("scheduled").catch((e) => log("plan_error", e.message));
+      }, { timezone: "Asia/Jakarta" }));
+    }
+  }
+
+  if (watcherTimer) clearInterval(watcherTimer);
+  if (config.watcher?.enabled !== false) {
+    watcherTimer = setInterval(() => {
+      runWatcher().catch((e) => log("watcher_error", e.message));
+    }, (config.watcher?.intervalSec ?? 60) * 1000);
+  }
+
+  log("cron", `Started — screening ${screeningIntervalMin}m, management ${managementIntervalMin}m, plan ${config.plan?.enabled === false ? "off" : `${(config.plan?.times ?? []).join("/")} WIB`}, watcher ${config.watcher?.enabled === false ? "off" : `${config.watcher?.intervalSec ?? 60}s`} [${config.activeMode}]`);
   syncFastManagementTimer();
 }
 
@@ -347,6 +447,8 @@ const HELP = [
   "/stats — track record by setup type / session / side",
   "/memory — thesis history",
   "/calendar — high-impact USD events this week",
+  "/plan — today's plan (bias, POIs, triggers)",
+  "/replan — rebuild today's plan now",
   "/mode scalp|day|swing — switch mode (saved to user-config.json)",
   "Anything else is answered by the GENERAL agent.",
 ].join("\n");
@@ -389,6 +491,15 @@ async function handleCommand(text, reply) {
     }
     case "/stats":
       return reply(formatPerformanceStats(getActiveMode().id));
+    case "/plan":
+      return reply(formatPlanMessage(getActivePlan()));
+    case "/replan": {
+      await reply("🗺 Re-planning…");
+      const plan = await runPlanning("manual");
+      if (!plan) return reply("Planner failed or market closed — check logs.");
+      // The plan itself is pushed by runPlanning unless Telegram plan notifications are off.
+      return config.plan?.notifyTelegram === false ? reply(formatPlanMessage(plan)) : undefined;
+    }
     case "/calendar": {
       const evs = upcomingEvents(await getCalendarEvents(), Date.now(), 24 * 7);
       return reply(evs.length ? `📅 High-impact events\n${evs.map((e) => `• ${formatEvent(e)}`).join("\n")}` : "No high-impact events left this week.");
@@ -438,10 +549,14 @@ if (isMain) {
 
   startCronJobs();
   if (telegramEnabled()) startPolling(telegramHandler);
-  runScreeningCycle({ silent: true }).catch((e) => log("startup_error", e.message));
+  (async () => {
+    if (config.plan?.enabled !== false && !getActivePlan()) await runPlanning("startup");
+    await runScreeningCycle({ silent: true });
+  })().catch((e) => log("startup_error", e.message));
 
   const shutdown = async () => {
     if (fastMgmtTimer) clearInterval(fastMgmtTimer);
+    if (watcherTimer) clearInterval(watcherTimer);
     cronTasks.forEach((t) => t.stop());
     await closeMcp().catch(() => {});
     process.exit(0);

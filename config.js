@@ -42,7 +42,7 @@ const defaultModes = {
     label: "Scalping",
     timeframes: ["5m", "15m", "1h", "4h"],
     mtfStyle: "intraday",
-    screeningIntervalMin: 10,
+    screeningIntervalMin: 15,
     managementIntervalMin: 3,
     setupMaxAgeMin: 90,
     entryZonePips: 3,
@@ -106,6 +106,8 @@ const m = u.management || {};
 
 export const config = {
   activeMode: u.activeMode ?? "scalp",
+  // Bump when the rules change; stats and the performance gate only count the current version.
+  strategyVersion: u.strategyVersion ?? "v1-pdf",
   market: {
     dataSymbol: u.dataSymbol ?? u.market?.dataSymbol ?? "XAUUSD",
     dataExchange: u.dataExchange ?? u.market?.dataExchange ?? "TVC",
@@ -166,11 +168,27 @@ export const config = {
     },
   },
   llm: {
-    temperature: u.temperature ?? u.llm?.temperature ?? 0.35,
+    temperature: u.temperature ?? u.llm?.temperature ?? 0.15,
     maxTokens: u.maxTokens ?? u.llm?.maxTokens ?? 4096,
     maxSteps: u.maxSteps ?? u.llm?.maxSteps ?? 15,
     screeningModel: resolveLlmModel(u.screeningModel ?? u.llm?.screeningModel),
+    planningModel: u.llm?.planningModel ? resolveLlmModel(u.llm.planningModel) : null,
     generalModel: resolveLlmModel(u.generalModel ?? u.llm?.generalModel),
+  },
+  plan: {
+    enabled: u.plan?.enabled !== false,
+    times: u.plan?.times ?? ["06:30", "13:30", "18:30"],
+    offPlanMinConfidence: u.plan?.offPlanMinConfidence ?? 75,
+    offPlanMinConfluence: u.plan?.offPlanMinConfluence ?? 3,
+    replanCooldownMin: u.plan?.replanCooldownMin ?? 60,
+    notifyTelegram: u.plan?.notifyTelegram !== false,
+  },
+  watcher: {
+    enabled: u.watcher?.enabled !== false,
+    intervalSec: u.watcher?.intervalSec ?? 60,
+    cooldownMin: u.watcher?.cooldownMin ?? 30,
+    minGapMin: u.watcher?.minGapMin ?? 3,
+    notifyPoiTouch: u.watcher?.notifyPoiTouch !== false,
   },
   calendar: {
     enabled: u.calendar?.enabled !== false,
@@ -190,7 +208,7 @@ export const config = {
   performanceGate: {
     enabled: u.performanceGate?.enabled !== false,
     windowDays: u.performanceGate?.windowDays ?? 60,
-    minTrades: u.performanceGate?.minTrades ?? 5,
+    minTrades: u.performanceGate?.minTrades ?? 15,
     maxWinRate: u.performanceGate?.maxWinRate ?? 30,
   },
   setupMemory: {
@@ -207,6 +225,7 @@ export const config = {
     asianNearPips: u.smc?.asianNearPips ?? 5,
     asianRangeMinPips: u.smc?.asianRangeMinPips ?? 5,
     slBelowSweepPips: u.smc?.slBelowSweepPips ?? 10,
+    equalTolPips: u.smc?.equalTolPips ?? null,
   },
   mtfZones: {
     enabled: u.mtfZones?.enabled !== false,

@@ -50,10 +50,10 @@ test("confidence gate", () => {
 });
 
 test("RSI gate blocks trend trades into extremes but not turtle soup", () => {
-  assert.equal(validateRsi({ side: "short", setup_type: "fib_retrace" }, 30).ok, false);
-  assert.equal(validateRsi({ side: "long", setup_type: "snr_bounce_long" }, 70).ok, false);
+  assert.equal(validateRsi({ side: "short", setup_type: "bms_rto_ote" }, 30).ok, false);
+  assert.equal(validateRsi({ side: "long", setup_type: "bms_rto_ote" }, 70).ok, false);
   assert.equal(validateRsi({ side: "long", setup_type: "turtle_soup_long" }, 25).ok, true);
-  assert.equal(validateRsi({ side: "long", setup_type: "fib_retrace" }, null).ok, true);
+  assert.equal(validateRsi({ side: "long", setup_type: "bms_rto_ote" }, null).ok, true);
 });
 
 test("isLimitFilled", () => {
@@ -69,11 +69,11 @@ test("isLimitFilled", () => {
 test("SL bounds apply even when the LLM owns SL/TP", async () => {
   const { validateProposedSl } = await import("../tools/setup-gates.js");
   const m = { ...mode, minSlPips: 20, maxSlPips: 40 };
-  const wide = validateProposedSl({ side: "short", entry: 4167.36, sl: 4189.53, setup_type: "dip_reclaim_short" }, null, m);
+  const wide = validateProposedSl({ side: "short", entry: 4167.36, sl: 4189.53, setup_type: "sh_bms_rto" }, null, m);
   assert.equal(wide.ok, false);
   assert.equal(wide.reason, "sl_too_wide");
-  assert.equal(validateProposedSl({ side: "short", entry: 4167.36, sl: 4170.5, setup_type: "dip_reclaim_short" }, null, m).ok, true);
-  assert.equal(validateProposedSl({ side: "short", entry: 4167.36, sl: 4168.5, setup_type: "dip_reclaim_short" }, null, m).reason, "sl_too_tight");
+  assert.equal(validateProposedSl({ side: "short", entry: 4167.36, sl: 4170.5, setup_type: "sh_bms_rto" }, null, m).ok, true);
+  assert.equal(validateProposedSl({ side: "short", entry: 4167.36, sl: 4168.5, setup_type: "sh_bms_rto" }, null, m).reason, "sl_too_tight");
 });
 
 test("TP beyond the mode's reach is rejected", async () => {
