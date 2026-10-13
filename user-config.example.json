@@ -122,8 +122,16 @@
     "screeningModel": null,
     "generalModel": null
   },
+  "calendar": {
+    "enabled": true,
+    "currencies": ["USD"],
+    "impacts": ["High"],
+    "blackoutBeforeMin": 15,
+    "blackoutAfterMin": 15,
+    "warnOpenSetupMin": 30
+  },
   "news": {
-    "query": "gold | bullion | xau",
+    "query": "\"gold price\" | \"spot gold\" | \"gold futures\" | bullion | xauusd",
     "lookbackHours": 24,
     "cacheMin": 30,
     "dailyBudget": 60

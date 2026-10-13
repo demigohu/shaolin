@@ -44,6 +44,18 @@ export const tools = [
   {
     type: "function",
     function: {
+      name: "get_economic_calendar",
+      description: "High-impact USD economic releases (CPI, NFP, FOMC, Fed speakers...) with WIB time, countdown, forecast/previous, and whether a news blackout is active now.",
+      parameters: {
+        type: "object",
+        properties: { hours: { type: "number", description: "Look-ahead window in hours (default 48)" } },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_market_context",
       description: "Global market snapshot (indices, VIX, FX, GLD).",
       parameters: { type: "object", properties: {}, additionalProperties: false },

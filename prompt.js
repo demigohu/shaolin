@@ -48,6 +48,8 @@ You are the trader. YOU decide entry, SL, and TP from SNR + fib + structure — 
 
 ${prefetchBlock}
 
+${context.calendarSummary || ""}
+
 OPEN SETUPS (do NOT call propose_setup if any listed):
 ${getSetupsSummary()}
 

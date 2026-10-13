@@ -30,6 +30,12 @@ async function main() {
         console.log(getSetupMemorySummary(10));
       }
       break;
+    case "calendar": {
+      const { getCalendarEvents, upcomingEvents, formatEvent } = await import("./tools/calendar.js");
+      const evs = upcomingEvents(await getCalendarEvents(), Date.now(), 24 * 7);
+      console.log(evs.length ? evs.map((e) => formatEvent(e)).join("\n") : "No high-impact events left this week.");
+      break;
+    }
     case "stats":
       console.log(formatPerformanceStats(getActiveMode().id));
       break;
@@ -59,6 +65,7 @@ async function main() {
   node cli.js cancel <id> Cancel one setup by ID
   node cli.js memory [fp] Thesis memory (or one fingerprint)
   node cli.js stats       Track record by setup type / session
+  node cli.js calendar    High-impact USD events this week
   node cli.js telegram-test  Test Telegram bot + send ping
   npm run mcp:smoke       MCP smoke test
 `);

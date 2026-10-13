@@ -28,6 +28,7 @@ import { formatAgentStatus } from "./status.js";
 import { formatPerformanceStats } from "./performance-stats.js";
 import { getSetupMemorySummary } from "./setup-memory.js";
 import { clearStagedSignals } from "./signal-tracker.js";
+import { getCalendarEvents, checkNewsBlackout, formatCalendarForPrompt, upcomingEvents, formatEvent } from "./tools/calendar.js";
 import { buildSMCContext, formatSMCForPrompt, getLastSMCContext } from "./smc.js";
 
 let _screeningBusy = false;
@@ -134,6 +135,14 @@ export async function runScreeningCycle({ silent = false } = {}) {
       return msg;
     }
 
+    const calendarEvents = await getCalendarEvents();
+    const blackout = checkNewsBlackout(calendarEvents);
+    if (!blackout.ok) {
+      appendScreeningDecision({ action: "AVOID", summary: blackout.message, reason: "news_blackout" });
+      log("screen", blackout.message);
+      return blackout.message;
+    }
+
     clearStagedSignals();
     let smcSummary = null;
     if (config.smc?.enabled !== false) {
@@ -154,7 +163,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
       if (!silent && args && Object.keys(args).length) log("tool", `${name}(${JSON.stringify(args)})`);
     };
     let { content, messages } = await agentLoop(goal, config.llm.maxSteps, "SCREENER", config.llm.screeningModel, {
-      context: { prefetchSummary: smcSummary },
+      context: { prefetchSummary: smcSummary, calendarSummary: formatCalendarForPrompt(calendarEvents) },
       onToolStart,
     });
     content = cleanContent(content);
@@ -221,6 +230,24 @@ async function expireOpenSetups(mode, price) {
   return events;
 }
 
+const _warnedEvents = new Set();
+
+/** One-time heads-up when a high-impact release is close and setups are open. */
+async function newsWarnings(open) {
+  const warnMin = config.calendar?.warnOpenSetupMin ?? 30;
+  if (config.calendar?.enabled === false || warnMin <= 0) return [];
+  const now = Date.now();
+  const soon = upcomingEvents(await getCalendarEvents(), now, warnMin / 60).filter((e) => e.time >= now);
+  const out = [];
+  for (const e of soon) {
+    const key = `${e.title}@${e.time}`;
+    if (_warnedEvents.has(key)) continue;
+    _warnedEvents.add(key);
+    out.push(`📰 ${formatEvent(e, now)} — ${open.length} setup(s) open (${open.map((s) => s.id).join(", ")}). Consider tightening SL / taking partials before the release.`);
+  }
+  return out;
+}
+
 export async function runManagementCycle({ silent = false, forceDigest = false, streamUpdate = false } = {}) {
   if (_managementBusy) return null;
   _managementBusy = true;
@@ -264,6 +291,7 @@ export async function runManagementCycle({ silent = false, forceDigest = false, 
     for (const s of written) if (resolved.includes(s.id)) recordSetupOutcome(s);
 
     const stillOpen = getOpenSetups();
+    if (stillOpen.length) events.push(...(await newsWarnings(stillOpen)));
     const notifyMgmt = config.notifications?.enabled !== false;
     // TP/SL/fill events are always pushed — fast-poll cycles are "silent" only for digests.
     if (notifyMgmt && events.length && !forceDigest) await sendMessage(formatEventAlert(events));
@@ -314,6 +342,7 @@ const HELP = [
   "/cancel <setup-id> — cancel one setup",
   "/stats — track record by setup type / session / side",
   "/memory — thesis history",
+  "/calendar — high-impact USD events this week",
   "/mode scalp|day|swing — switch mode (saved to user-config.json)",
   "Anything else is answered by the GENERAL agent.",
 ].join("\n");
@@ -356,6 +385,10 @@ async function handleCommand(text, reply) {
     }
     case "/stats":
       return reply(formatPerformanceStats(getActiveMode().id));
+    case "/calendar": {
+      const evs = upcomingEvents(await getCalendarEvents(), Date.now(), 24 * 7);
+      return reply(evs.length ? `📅 High-impact events\n${evs.map((e) => `• ${formatEvent(e)}`).join("\n")}` : "No high-impact events left this week.");
+    }
     case "/memory":
       return reply(`Thesis memory:\n${getSetupMemorySummary(8)}`);
     case "/mode": {

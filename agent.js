@@ -8,7 +8,7 @@ import { config } from "./config.js";
 
 const SCREENER_TOOLS = new Set([
   "get_smc_context", "get_mtf_zones", "get_xauusd_mtf", "get_xauusd_combined", "get_xauusd_price", "get_gold_news",
-  "get_market_context", "propose_setup",
+  "get_market_context", "get_economic_calendar", "propose_setup",
 ]);
 
 function getToolsForRole(agentType) {

@@ -5,6 +5,7 @@ import { getActiveMode, getCurrentSession } from "../modes.js";
 import { recallForThesis } from "../setup-memory.js";
 import { recordSetupOutcome } from "../lessons.js";
 import { checkTrackRecord } from "../performance-stats.js";
+import { getCalendarEvents, checkNewsBlackout, formatCalendarForPrompt, upcomingEvents } from "./calendar.js";
 import { stageSignals, getAndClearStagedSignals, extractSignalsFromMtf, extractSignalsFromCombined } from "../signal-tracker.js";
 import { buildSMCContext, validateSMCSetup, getLastSMCContext, formatSMCForPrompt } from "../smc.js";
 import { formatMtfZonesForPrompt } from "../mtf-zones.js";
@@ -40,7 +41,8 @@ async function proposeSetup(args) {
 
   const smcCheck = validateSMCSetup(args, ctx);
   const trackRecord = checkTrackRecord({ setup_type: args.setup_type, session: getCurrentSession(), mode: mode.id });
-  for (const check of [validateConfidence(args, mode), validateRsi(args, rsi), smcCheck, trackRecord]) {
+  const blackout = checkNewsBlackout(await getCalendarEvents());
+  for (const check of [blackout, validateConfidence(args, mode), validateRsi(args, rsi), smcCheck, trackRecord]) {
     if (!check.ok) return blocked(check, args);
   }
 
@@ -99,7 +101,15 @@ const toolMap = {
     return result;
   },
   get_xauusd_price: () => market.getManagementPrice(),
-  get_gold_news: (args) => market.getGoldNews(args?.limit ?? 5),
+  get_gold_news: (args) => market.getGoldNews(args?.limit ?? 3),
+  get_economic_calendar: async (args) => {
+    const events = await getCalendarEvents();
+    return {
+      events: upcomingEvents(events, Date.now(), args?.hours ?? 48),
+      blackout: checkNewsBlackout(events),
+      summary: formatCalendarForPrompt(events),
+    };
+  },
   get_market_context: () => market.getMarketSnapshot(),
   get_mtf_zones: async () => {
     const ctx = await buildSMCContext();

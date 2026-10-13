@@ -25,6 +25,7 @@ XAUUSD agent: screening → auto-log setup → monitor → lessons.
 | Live price, indicators, RSI, EMA trend | MCP `coin_analysis` → TradingView `TVC:GOLD` (cached 30s) |
 | Candle history (5m/15m/1h/1d; 4h aggregated) | Yahoo chart API `GC=F`, shifted by `basis = futures − spot` (`tools/candles.js`) |
 | Monthly pivots | MCP `support_resistance`. These are `Pivot.M.Classic` and identical on every timeframe, so they are used once. |
+| Economic calendar | Forex Factory weekly feed (`tools/calendar.js`), cached 1h, filtered by `calendar.currencies` / `impacts` |
 | Gold headlines | Marketaux directly (`tools/news.js`): `news.query`, last `lookbackHours`, newest first, cached `cacheMin`, capped at `dailyBudget`/day. The MCP's `combined_analysis` / `financial_news` are not used: their Marketaux lookup has no date filter and returned articles from years ago. |
 
 Yahoo's COMEX quote lags about 10 minutes, so the basis is measured at a shared instant: the TradingView 1h/15m bar open vs the Yahoo 5m candle with the same timestamp. During the first ~10 minutes of an hour the last measurement is reused. The management price never falls back to Yahoo: it is delayed futures data, and SL/TP tracking pauses instead.
@@ -55,7 +56,7 @@ Zone merge/proximity distance defaults to 8/5, 15/10 and 40/25 pips respectively
 
 ## propose_setup gates (in order)
 
-confidence ≥ `mode.minConfidence` → RSI extreme (trend setups only) → SMC (setup type, confluence, trading window, no shorting into a fresh SSL raid / no longing into a BSL raid) → entry vs live price (market within slippage; limit on the retrace side and within `maxLimitEntryPips`) → SL (side; structure checks when `llmOwnsTpSl=false`) → TP side → reason / `sl_anchor` / TP labels → min RR → book-keeping (one open setup per side, thesis cooldown, daily cap).
+news blackout → confidence ≥ `mode.minConfidence` → RSI extreme (trend setups only) → SMC (setup type, confluence, trading window, no shorting into a fresh SSL raid / no longing into a BSL raid) → entry vs live price (market within slippage; limit on the retrace side and within `maxLimitEntryPips`) → SL (side; structure checks when `llmOwnsTpSl=false`) → TP side → reason / `sl_anchor` / TP labels → min RR → book-keeping (one open setup per side, thesis cooldown, daily cap).
 
 ## Persistent files
 
@@ -82,6 +83,10 @@ Outcomes:
 - `setupMaxAgeMin` expires unfilled setups from proposal time. Filled setups get a time exit at that age, counted from the fill.
 - Win rate, thesis cooldown and the performance gate count only filled trades.
 - Fast management polls every `management.fastPollSec` while setups are open. TP/SL/fill events are always pushed to Telegram, and the live monitor message is edited in place.
+
+## News blackout
+
+Screening is skipped (no LLM call) and `propose_setup` rejects new setups from `calendar.blackoutBeforeMin` before until `blackoutAfterMin` after each high-impact event. The next 24h of events are shown in the SCREENER prompt. When setups are open, management sends a one-time Telegram warning `warnOpenSetupMin` before a release.
 
 ## Learning
 

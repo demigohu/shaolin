@@ -12,7 +12,7 @@
  * Yahoo 5m candle starting at the same timestamp.
  */
 
-import { fetch as undiciFetch, ProxyAgent } from "undici";
+import { proxyDispatcher, describeError, httpGet } from "./http.js";
 import { config } from "../config.js";
 import { log } from "../logger.js";
 
@@ -21,32 +21,10 @@ const RANGE = { "5m": "2d", "15m": "5d", "1h": "1mo", "1d": "1y" };
 const STALE_OK_MS = 30 * 60_000;
 const H4_MS = 4 * 60 * 60_000;
 const HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
+const PROXY_ATTEMPTS = 3;
 
 const cache = new Map();
 let lastBasis = null;
-
-/**
- * Same Webshare env vars the MCP uses (PROXY_ENABLED / PROXY_HOST / PROXY_PORT /
- * PROXY_USERNAME_PREFIX / PROXY_PASSWORD) — cloud IPs are often 429'd by Yahoo.
- */
-function proxyDispatcher() {
-  const prefix = process.env.PROXY_USERNAME_PREFIX;
-  const password = process.env.PROXY_PASSWORD;
-  if ((process.env.PROXY_ENABLED ?? "true").toLowerCase() !== "true" || !prefix || !password) return null;
-  const min = Number(process.env.PROXY_SESSION_MIN ?? 1);
-  const max = Number(process.env.PROXY_SESSION_MAX ?? 250);
-  const session = min + Math.floor(Math.random() * (max - min + 1));
-  const host = process.env.PROXY_HOST || "p.webshare.io";
-  const port = process.env.PROXY_PORT || "80";
-  return new ProxyAgent(`http://${encodeURIComponent(`${prefix}-${session}`)}:${encodeURIComponent(password)}@${host}:${port}`);
-}
-
-const PROXY_ATTEMPTS = 3;
-
-function describeError(error) {
-  const cause = error.cause;
-  return cause ? `${error.message}: ${cause.code || cause.message || cause}` : error.message;
-}
 
 /** Try each Yahoo host; through a proxy, each attempt uses a fresh session (another exit IP). */
 async function fetchChart(interval) {
@@ -60,11 +38,7 @@ async function fetchChart(interval) {
     for (const host of HOSTS) {
       const url = `https://${host}/v8/finance/chart/${symbol}?interval=${interval}&range=${RANGE[interval]}`;
       try {
-        const res = await undiciFetch(url, {
-          headers: { "User-Agent": "Mozilla/5.0" },
-          signal: AbortSignal.timeout(15_000),
-          ...(dispatcher ? { dispatcher } : {}),
-        });
+        const res = await httpGet(url, { dispatcher });
         if (res.ok) return res.json();
         errors.push(`${host} HTTP ${res.status}`);
       } catch (error) {

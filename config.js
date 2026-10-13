@@ -169,8 +169,16 @@ export const config = {
     screeningModel: resolveLlmModel(u.screeningModel ?? u.llm?.screeningModel),
     generalModel: resolveLlmModel(u.generalModel ?? u.llm?.generalModel),
   },
+  calendar: {
+    enabled: u.calendar?.enabled !== false,
+    currencies: u.calendar?.currencies ?? ["USD"],
+    impacts: u.calendar?.impacts ?? ["High"],
+    blackoutBeforeMin: u.calendar?.blackoutBeforeMin ?? 15,
+    blackoutAfterMin: u.calendar?.blackoutAfterMin ?? 15,
+    warnOpenSetupMin: u.calendar?.warnOpenSetupMin ?? 30,
+  },
   news: {
-    query: u.news?.query ?? "gold | bullion | xau",
+    query: u.news?.query ?? '"gold price" | "spot gold" | "gold futures" | bullion | xauusd',
     lookbackHours: u.news?.lookbackHours ?? 24,
     cacheMin: u.news?.cacheMin ?? 30,
     dailyBudget: u.news?.dailyBudget ?? 60,
