@@ -4,7 +4,12 @@
  * The TradingView MCP only exposes the CURRENT bar + monthly pivots, so real
  * candle history comes from Yahoo's chart API (GC=F futures). Futures trade at a
  * basis to spot (TVC:GOLD, what the agent screens/manages on), so every candle is
- * shifted by `basis = futures_last - spot_last` measured at fetch time.
+ * shifted by that basis.
+ *
+ * Yahoo's COMEX feed is ~10 minutes delayed, so "latest futures − live spot" is
+ * wrong by however far gold moved in those minutes. The basis is instead measured
+ * at a shared instant: the open of the current TradingView 1h/15m bar vs the
+ * Yahoo 5m candle starting at the same timestamp.
  */
 
 import { fetch as undiciFetch, ProxyAgent } from "undici";
@@ -141,10 +146,23 @@ export function aggregateWeekly(candles) {
 }
 
 /**
- * Fetch 5m/15m/1h/1d futures candles and shift them onto the spot feed.
- * Returns null when spot price is unknown (basis can't be measured).
+ * Basis from bar opens at the same instant. `anchors` = [{ t, spot }] where spot
+ * is the TradingView bar open at UTC time t; returns null if Yahoo has no 5m
+ * candle starting at any anchor yet (its feed lags ~10 min).
  */
-export async function getSpotCandleSet(spotPrice) {
+export function measureBasis(m5Candles, anchors) {
+  for (const { t, spot } of [...anchors].sort((a, b) => b.t - a.t)) {
+    const k = m5Candles.find((c) => c.t === t);
+    if (k && Number.isFinite(spot)) return k.o - spot;
+  }
+  return null;
+}
+
+/**
+ * Fetch 5m/15m/1h/1d futures candles and shift them onto the spot feed.
+ * Returns null when no basis can be established.
+ */
+export async function getSpotCandleSet(spotPrice, anchors = []) {
   if (spotPrice == null) return null;
 
   // Sequential — Yahoo throttles bursts from VPS IPs.
@@ -153,16 +171,14 @@ export async function getSpotCandleSet(spotPrice) {
   const h1 = await fetchCandles("1h");
   const d1 = await fetchCandles("1d");
 
-  // Basis must pair a FRESH futures quote with the live spot price; a stale quote
-  // would shift every level by however far price moved since it was cached.
-  let basis;
-  if (!m5.stale && m5.last != null) {
-    basis = m5.last - spotPrice;
+  let basis = measureBasis(m5.candles, anchors);
+  if (basis != null) {
     lastBasis = { basis, at: Date.now() };
   } else {
+    // First ~10 minutes of an hour: Yahoo hasn't published the anchor candle yet.
     basis = getRecentBasis();
-    if (basis == null) throw new Error("no fresh futures quote to measure the futures→spot basis");
-    log("candles_warn", `5m quote stale — reusing basis ${basis.toFixed(2)} measured ${Math.round((Date.now() - lastBasis.at) / 60000)}m ago`);
+    if (basis == null) throw new Error("cannot measure futures→spot basis yet (Yahoo feed lags ~10 min behind the bar opens)");
+    log("candles_warn", `Reusing basis ${basis.toFixed(2)} measured ${Math.round((Date.now() - lastBasis.at) / 60000)}m ago`);
   }
 
   const h1Spot = shiftCandles(h1.candles, basis);
@@ -178,8 +194,8 @@ export async function getSpotCandleSet(spotPrice) {
   };
 }
 
-/** Last measured futures→spot basis, if recent enough to convert a Yahoo quote. */
-export function getRecentBasis(maxAgeMs = STALE_OK_MS) {
+/** Last anchor-measured futures→spot basis, if recent enough. */
+export function getRecentBasis(maxAgeMs = 2 * 60 * 60_000) {
   if (!lastBasis || Date.now() - lastBasis.at > maxAgeMs) return null;
   return lastBasis.basis;
 }

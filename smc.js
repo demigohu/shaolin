@@ -184,10 +184,16 @@ export async function buildSMCContext() {
     if (price != null) break;
   }
 
+  // TradingView bar opens at UTC hour / quarter-hour boundaries anchor the futures→spot basis.
+  const nowMs = Date.now();
+  const anchors = [["1h", 3_600_000], ["15m", 900_000]]
+    .filter(([tf]) => tv[tf]?.price_data?.open != null)
+    .map(([tf, ms]) => ({ t: Math.floor(nowMs / ms) * ms, spot: Number(tv[tf].price_data.open) }));
+
   let candles = null;
   let candleError = null;
   try {
-    candles = await getSpotCandleSet(price);
+    candles = await getSpotCandleSet(price, anchors);
   } catch (error) {
     candleError = error.message;
     log("smc_warn", `Candle history unavailable: ${error.message}`);

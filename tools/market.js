@@ -2,7 +2,6 @@ import { config } from "../config.js";
 import { callMcpTool } from "./mcp-client.js";
 import { getActiveMode } from "../modes.js";
 import { log } from "../logger.js";
-import { getRecentBasis } from "./candles.js";
 
 const ANALYSIS_TTL_MS = 30_000;
 const analysisCache = new Map();
@@ -12,15 +11,6 @@ export function extractPriceFromAnalysis(analysis) {
   if (!analysis || analysis.error) return null;
   const pd = analysis.price_data || {};
   for (const candidate of [pd.current_price, pd.close, analysis.price, analysis.close]) {
-    const n = Number(candidate);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
-  return null;
-}
-
-export function extractPriceFromYahoo(quote) {
-  if (!quote || quote.error) return null;
-  for (const candidate of [quote.price, quote.regularMarketPrice, quote.last, quote.close]) {
     const n = Number(candidate);
     if (Number.isFinite(n) && n > 0) return n;
   }
@@ -138,13 +128,12 @@ export async function getXauusdCombined(timeframe) {
 }
 
 /**
- * Live price on the screening feed (TVC:GOLD). Yahoo GC=F is a FUTURES quote
- * ($10–30 away from spot), so it is only used converted by a recently measured
- * basis — never raw, or SL/TP would trigger on the wrong price.
+ * Live price on the screening feed (TVC:GOLD). There is deliberately no Yahoo
+ * fallback: its COMEX quote is futures (basis away from spot) and ~10 min
+ * delayed, which could trigger SL/TP on a price that no longer exists.
  */
 export async function getManagementPrice() {
   const errors = [];
-
   for (const tf of ["5m", "15m", "1h"]) {
     const analysis = await fetchAnalysis(tf, { maxAgeMs: 10_000 });
     if (analysis?.error) {
@@ -157,29 +146,6 @@ export async function getManagementPrice() {
     }
     errors.push(`tv/${tf}: no price in response`);
   }
-
-  const basis = getRecentBasis();
-  if (basis == null) {
-    errors.push("yahoo: no recent futures→spot basis, raw GC=F not comparable to spot levels");
-  } else {
-    try {
-      const quote = await callMcpTool("yahoo_price", { symbol: config.market.yahooSymbol });
-      const futures = extractPriceFromYahoo(quote);
-      if (futures != null) {
-        return {
-          price: Number((futures - basis).toFixed(config.broker.digits ?? 2)),
-          source: "yahoo_basis_adjusted",
-          symbol: config.market.yahooSymbol,
-          basis,
-          warnings: errors,
-        };
-      }
-      errors.push(`yahoo: ${quote?.error || "no price in response"}`);
-    } catch (error) {
-      errors.push(`yahoo: ${error.message}`);
-    }
-  }
-
   log("mgmt_warn", `All price sources failed: ${errors.join(" | ")}`);
   return { price: null, source: null, errors };
 }

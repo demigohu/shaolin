@@ -119,3 +119,11 @@ test("aggregateWeekly starts weeks on Monday", async () => {
   assert.equal(w.length, 2);
   assert.deepEqual([w[1].h, w[1].l], [9, 2]);
 });
+
+test("measureBasis pairs futures and spot at the same bar open, newest anchor first", async () => {
+  const { measureBasis } = await import("../tools/candles.js");
+  const m5 = [candle(1000, 4208.9, 4210, 4208, 4209), candle(2000, 4212, 4213, 4211, 4212)];
+  assert.equal(measureBasis(m5, [{ t: 1000, spot: 4185.2 }, { t: 2000, spot: 4188 }]).toFixed(1), "24.0");
+  assert.equal(measureBasis(m5, [{ t: 3000, spot: 4190 }, { t: 1000, spot: 4185.2 }]).toFixed(1), "23.7");
+  assert.equal(measureBasis(m5, [{ t: 3000, spot: 4190 }]), null, "Yahoo candle not published yet");
+});

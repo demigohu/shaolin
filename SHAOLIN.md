@@ -27,7 +27,7 @@ XAUUSD agent: screening → auto-log setup → monitor → lessons.
 | Monthly pivots | MCP `support_resistance`. These are `Pivot.M.Classic` and identical on every timeframe, so they are used once. |
 | News / sentiment | MCP `combined_analysis` (Marketaux token optional) |
 
-Raw Yahoo `GC=F` is never compared with spot levels. The management price falls back to Yahoo only when converted by a basis measured within the last 30 minutes.
+Yahoo's COMEX quote lags about 10 minutes, so the basis is measured at a shared instant: the TradingView 1h/15m bar open vs the Yahoo 5m candle with the same timestamp. During the first ~10 minutes of an hour the last measurement is reused. The management price never falls back to Yahoo: it is delayed futures data, and SL/TP tracking pauses instead.
 
 ## Structure per mode (`STRUCTURE_PROFILES` in `smc.js`)
 

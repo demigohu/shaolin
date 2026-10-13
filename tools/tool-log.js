@@ -1,6 +1,6 @@
 /** One-line / multi-line summaries of MCP tool results for CLI + logs. */
 
-import { extractPriceFromYahoo, extractRsi } from "./market.js";
+import { extractRsi } from "./market.js";
 
 export function summarizeToolResult(name, result, args = {}) {
   if (!result) return "empty result";
@@ -17,7 +17,7 @@ export function summarizeToolResult(name, result, args = {}) {
     case "get_xauusd_combined":
       return summarizeCombined(result, args);
     case "get_xauusd_price": {
-      const p = extractPriceFromYahoo(result) ?? result?.price;
+      const p = result?.price;
       return `price=${p ?? "?"} (${result?.symbol || "XAUUSD"})${result?.error ? ` ERR ${result.error}` : ""}`;
     }
     case "get_gold_news":
