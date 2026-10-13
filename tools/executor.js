@@ -17,6 +17,7 @@ import {
   validateMinRr,
   validateConfidence,
   validateRsi,
+  validateTpDistance,
 } from "./setup-gates.js";
 import * as market from "./market.js";
 
@@ -54,7 +55,7 @@ async function proposeSetup(args) {
   if (!entryCheck.ok) return blocked(entryCheck, args);
 
   const tpCheck = validateProposedTp(args);
-  for (const check of [validateProposedSl(args, ctx, mode), tpCheck, validateSetupReason(args), validateMinRr(args, mode)]) {
+  for (const check of [validateProposedSl(args, ctx, mode), tpCheck, validateTpDistance(args, mode), validateSetupReason(args), validateMinRr(args, mode)]) {
     if (!check.ok) return blocked(check, args);
   }
 

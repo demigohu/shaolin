@@ -117,7 +117,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
       return msg;
     }
 
-    await expireOpenSetups(mode, null);
+    await expireOpenSetups(mode, null, { notify: true });
 
     const open = getOpenSetups();
     if (open.length > 0) {
@@ -214,8 +214,12 @@ export async function runScreeningCycle({ silent = false } = {}) {
   }
 }
 
-/** Time-stop open setups; filled ones need a live price to book the exit. */
-async function expireOpenSetups(mode, price) {
+/**
+ * Time-stop open setups; filled ones need a live price to book the exit.
+ * Returns the events; sends them itself only when `notify` (the management
+ * cycle batches them into its own alert).
+ */
+async function expireOpenSetups(mode, price, { notify = false } = {}) {
   const changed = [];
   const events = [];
   for (const setup of getOpenSetups()) {
@@ -226,7 +230,7 @@ async function expireOpenSetups(mode, price) {
     }
   }
   for (const s of persistSetups(changed)) recordSetupOutcome(s);
-  if (events.length && config.notifications?.enabled !== false) await sendMessage(formatEventAlert(events));
+  if (notify && events.length && config.notifications?.enabled !== false) await sendMessage(formatEventAlert(events));
   return events;
 }
 

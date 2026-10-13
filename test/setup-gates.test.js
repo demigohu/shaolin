@@ -65,3 +65,22 @@ test("isLimitFilled", () => {
   assert.equal(isLimitFilled(short, 2005, 3), true);
   assert.equal(isLimitFilled(short, 1999, 3), false);
 });
+
+test("SL bounds apply even when the LLM owns SL/TP", async () => {
+  const { validateProposedSl } = await import("../tools/setup-gates.js");
+  const m = { ...mode, minSlPips: 20, maxSlPips: 40 };
+  const wide = validateProposedSl({ side: "short", entry: 4167.36, sl: 4189.53, setup_type: "dip_reclaim_short" }, null, m);
+  assert.equal(wide.ok, false);
+  assert.equal(wide.reason, "sl_too_wide");
+  assert.equal(validateProposedSl({ side: "short", entry: 4167.36, sl: 4170.5, setup_type: "dip_reclaim_short" }, null, m).ok, true);
+  assert.equal(validateProposedSl({ side: "short", entry: 4167.36, sl: 4168.5, setup_type: "dip_reclaim_short" }, null, m).reason, "sl_too_tight");
+});
+
+test("TP beyond the mode's reach is rejected", async () => {
+  const { validateTpDistance } = await import("../tools/setup-gates.js");
+  const m = { ...mode, maxTpPips: 150 };
+  const far = validateTpDistance({ entry: 4167.36, tp_levels: [{ price: 4068 }, { price: 4030 }] }, m);
+  assert.equal(far.ok, false);
+  assert.equal(far.reason, "tp_too_far");
+  assert.equal(validateTpDistance({ entry: 4167.36, tp_levels: [{ price: 4160 }, { price: 4155 }] }, m).ok, true);
+});

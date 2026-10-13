@@ -27,6 +27,7 @@
       "maxSlPips": 40,
       "minSlPips": 15,
       "maxStaleDistancePips": 15,
+      "maxTpPips": 150,
       "maxLimitEntryPips": 25,
       "minConfidence": 65,
       "minRrRatio": 1.2,
@@ -56,6 +57,7 @@
       "maxSlPips": 80,
       "minSlPips": 20,
       "maxStaleDistancePips": 40,
+      "maxTpPips": 400,
       "maxLimitEntryPips": 60
     },
     "swing": {
@@ -77,6 +79,7 @@
       "maxSlPips": 300,
       "minSlPips": 50,
       "maxStaleDistancePips": 150,
+      "maxTpPips": 1500,
       "maxLimitEntryPips": 200
     }
   },

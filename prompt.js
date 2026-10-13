@@ -85,9 +85,11 @@ ENTRY (SNR + Fib):
 
 TP / SL — structure-first (YOU define; width follows structure, not a pip template):
 - SL goes BEYOND the invalidation level — next support (long) or resistance (short), sweep wick, fib, or SNR from prefetch.
-  WIDE SL is OK (30–120p+) when that is where structure breaks. Never tighten SL just to improve RR.
-- TP: tp_levels at SNR/fib targets — min RR ${mode.minRrRatio ?? 1.2} to TP final (reward ≥ ${mode.minRrRatio ?? 1.2}× SL distance).
-  If nearest resistance is too close → skip TP1 there and target the NEXT level, or WATCH.
+  ${mode.id} limits: SL ${mode.minSlPips ?? "?"}–${mode.maxSlPips ?? "?"} pips from entry. If invalidation is farther, the entry is too far from structure → WATCH.
+  Never tighten SL just to improve RR.
+- TP: tp_levels at the NEAREST realistic SNR/fib targets, reachable within ${mode.setupMaxAgeMin ?? "?"} minutes — every TP ≤ ${mode.maxTpPips ?? "?"} pips from entry.
+  Final TP must give RR ≥ ${mode.minRrRatio ?? 1.2}. If the nearest level is too close → target the next one within the limit, or WATCH.
+  Do not target distant daily/weekly levels (PWL/PWH) on a ${mode.id} trade unless they are within the limit.
 - sl_anchor REQUIRED — one line why SL is there (structure name + level price).
 - Each tp_levels[].label REQUIRED — SNR/fib target name for that TP price.
 - reason = DIP→ENTRY thesis only (chain steps). Do NOT bury SL/TP labels inside reason.

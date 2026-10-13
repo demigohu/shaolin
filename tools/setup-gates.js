@@ -82,19 +82,26 @@ export function validateProposedSl(args, ctx, mode) {
   if (side === "long" && sl >= entry) return { ok: false, reason: "sl_wrong_side", message: "Long SL must be below entry." };
   if (side === "short" && sl <= entry) return { ok: false, reason: "sl_wrong_side", message: "Short SL must be above entry." };
 
+  // Mode bounds apply even when the LLM places SL (llmOwnsTpSl) — they are the risk envelope.
+  const minSl = resolveMinSlPips(args.setup_type, mode);
+  const maxSl = mode.maxSlPips;
+  if (slPips < minSl) {
+    return { ok: false, reason: "sl_too_tight", sl_pips: slPips, min_sl_pips: minSl, message: `SL ${slPips}p too tight (min ${minSl}p for ${mode.id}) — place beyond the next structure level.` };
+  }
+  if (maxSl != null && slPips > maxSl) {
+    return {
+      ok: false,
+      reason: "sl_too_wide",
+      sl_pips: slPips,
+      max_sl_pips: maxSl,
+      message: `SL ${slPips}p exceeds the ${maxSl}p max for ${mode.id}. Invalidation is too far for this mode — find an entry closer to structure, or WATCH. Do not just move SL inside structure.`,
+    };
+  }
+
   if (config.screening?.llmOwnsTpSl !== false) return { ok: true, sl_pips: slPips };
 
   const pip = pipSize();
-  const minSl = resolveMinSlPips(args.setup_type, mode);
-  const maxSl = mode.maxSlPips ?? 40;
   const bufferPips = config.screening?.slStructureBufferPips ?? 3;
-
-  if (slPips < minSl) {
-    return { ok: false, reason: "sl_too_tight", sl_pips: slPips, min_sl_pips: minSl, message: `SL ${slPips}p too tight (min ${minSl}p) — place beyond next structure level.` };
-  }
-  if (maxSl != null && slPips > maxSl) {
-    return { ok: false, reason: "sl_too_wide", sl_pips: slPips, max_sl_pips: maxSl, message: `SL ${slPips}p exceeds max ${maxSl}p.` };
-  }
   if (!STRUCTURE_SL_SETUPS.has(args.setup_type) || !ctx) return { ok: true, sl_pips: slPips };
 
   const raids = sideOfLiquidity(ctx.liquidity_events);
@@ -222,6 +229,23 @@ export function validateMinRr(args, mode) {
     };
   }
   return { ok: true, rr_ratio: rr };
+}
+
+/** Final TP must be reachable within the mode's holding time (mode.maxTpPips). */
+export function validateTpDistance(args, mode) {
+  const maxTp = mode.maxTpPips;
+  if (maxTp == null || !Array.isArray(args.tp_levels) || !args.tp_levels.length) return { ok: true };
+  const entry = Number(args.entry);
+  const far = args.tp_levels
+    .map((t) => ({ price: Number(t.price), pips: toPips(Math.abs(Number(t.price) - entry)) }))
+    .filter((t) => Number.isFinite(t.price) && t.pips > maxTp);
+  if (!far.length) return { ok: true };
+  return {
+    ok: false,
+    reason: "tp_too_far",
+    max_tp_pips: maxTp,
+    message: `TP ${far.map((t) => `${t.price} (${t.pips}p)`).join(", ")} beyond the ${maxTp}p max for ${mode.id} (holding time ≤ ${mode.setupMaxAgeMin ?? "?"}m). Target the nearest realistic SNR/fib level instead.`,
+  };
 }
 
 /** Normalized TP ladder, or none (template TPs are filled in by createSetup). */
