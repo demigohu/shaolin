@@ -270,6 +270,7 @@ export async function buildSMCContext() {
     liquidity_hints: liquidity.hints,
     suggested_setups: suggestPlaybooks(liquidity.events, amdPhase, swingTrend),
     min_confluence: config.smc?.minConfluence ?? 2,
+    reach_pips: mode.maxTpPips ?? null,
   };
 
   if (config.mtfZones?.enabled !== false) {
@@ -281,6 +282,7 @@ export async function buildSMCContext() {
       htfTrends: htfTrends.slice(0, 2),
       timeframes: profile.zones,
       mergePips: profile.mergePips,
+      reachPips: mode.maxTpPips ?? null,
       proximityPips: profile.proximityPips,
     });
     context.ltf.nearest_support = context.mtf_zones.nearestSupport?.price ?? null;
@@ -306,6 +308,15 @@ function formatTradingWindowLine(ctx) {
 
 const fmt = (v) => (v == null ? "?" : Number(v).toFixed(2));
 
+/** "4221.13 (+650p, context only)" — distance from price, flagged when beyond the mode's reach. */
+function lvl(ctx, v) {
+  if (v == null) return "?";
+  if (ctx.price == null) return fmt(v);
+  const d = toPips(v - ctx.price);
+  const far = ctx.reach_pips != null && Math.abs(d) > ctx.reach_pips;
+  return `${fmt(v)} (${d >= 0 ? "+" : ""}${d}p${far ? ", context only" : ""})`;
+}
+
 export function formatSMCForPrompt(ctx) {
   if (!ctx) return "SMC disabled.";
   const lines = [
@@ -324,10 +335,14 @@ export function formatSMCForPrompt(ctx) {
 
   if (ctx.asian_range) {
     const a = ctx.asian_range;
-    lines.push(`Asian range ${a.date}${a.complete ? "" : " (building)"}: ${fmt(a.low)} – ${fmt(a.high)} (${toPips(a.high - a.low)}p)`);
+    lines.push(`Asian range ${a.date}${a.complete ? "" : " (building)"}: low ${lvl(ctx, a.low)} – high ${lvl(ctx, a.high)}`);
   }
-  if (ctx.pdh != null) lines.push(`PDH ${fmt(ctx.pdh)} | PDL ${fmt(ctx.pdl)} | PWH ${fmt(ctx.pwh)} | PWL ${fmt(ctx.pwl)}`);
-  if (ctx.swing) lines.push(`${ctx.profile.swing_tf} swing (${ctx.swing.source}): low ${fmt(ctx.swing.swing_low)} – high ${fmt(ctx.swing.swing_high)}`);
+  if (ctx.reach_pips != null) {
+    lines.push(`Trade reach for ${ctx.mode}: ±${ctx.reach_pips}p. Levels marked "context only" are liquidity/bias references — never entries, SL anchors or TP targets.`);
+  }
+  if (ctx.pdh != null) lines.push(`PDH ${lvl(ctx, ctx.pdh)} | PDL ${lvl(ctx, ctx.pdl)}`);
+  if (ctx.pwh != null) lines.push(`PWH ${lvl(ctx, ctx.pwh)} | PWL ${lvl(ctx, ctx.pwl)}`);
+  if (ctx.swing) lines.push(`${ctx.profile.swing_tf} swing (${ctx.swing.source}): low ${lvl(ctx, ctx.swing.swing_low)} – high ${lvl(ctx, ctx.swing.swing_high)}`);
   if (ctx.fib) {
     const lv = ctx.fib.levels;
     lines.push(`Fib retrace (${ctx.fib.trend_for_fib}): ${["0.382", "0.5", "0.618", "0.786"].map((k) => `${k}=${fmt(lv[k])}`).join(" | ")}`);
@@ -339,7 +354,7 @@ export function formatSMCForPrompt(ctx) {
   lines.push(`Structure: ${s.bias}${s.bms_hint ? ` | ${s.bms_hint}` : ""}${bos?.bos ? ` | ${ctx.profile.bos_tf} ${bos.bos} (close ${fmt(bos.close)} vs swing H ${fmt(bos.last_swing_high)} / L ${fmt(bos.last_swing_low)})` : ""}`);
   if (ctx.order_blocks) {
     const ob = ctx.order_blocks;
-    const zone = (z) => (z ? `${fmt(z.low)}–${fmt(z.high)}` : "none");
+    const zone = (z) => (z ? `${fmt(z.low)}–${lvl(ctx, z.high)}` : "none");
     lines.push(`${ctx.profile.ob_tf} OB — bullish: ${zone(ob.bullish)} | bearish: ${zone(ob.bearish)}${ob.wick_rejection ? ` | last ${ctx.profile.wick_tf}: ${ob.wick_rejection}` : ""}`);
   }
   lines.push(`Trend ${Object.entries(ctx.htf).map(([tf, t]) => `${tf}: ${t}`).join(" | ")} | RSI ${ctx.ltf.rsi_tf} ${ctx.ltf.rsi ?? "?"}`);
@@ -366,7 +381,7 @@ export function formatSMCForPrompt(ctx) {
 
   lines.push("", "YOU set SL/TP from SNR + fib — not from config defaults.");
   lines.push("- SL: beyond invalidation (below demand / above supply you cite)");
-  lines.push("- TP: next SNR levels or fib extension — provide tp_levels[] on propose_setup");
+  lines.push(`- TP: nearest SNR/fib levels${ctx.reach_pips != null ? ` within ${ctx.reach_pips}p` : ""} — provide tp_levels[] on propose_setup`);
   lines.push(`- Suggested plays: ${ctx.suggested_setups.length ? ctx.suggested_setups.join(", ") : "none — WATCH"}`);
 
   return lines.join("\n");

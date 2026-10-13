@@ -118,6 +118,7 @@ export function buildMtfZoneStack({
   timeframes = ["4h", "1h", "15m", "5m"],
   mergePips = 8,
   proximityPips = 5,
+  reachPips = null,
 }) {
   const minStrength = config.mtfZones?.minZoneStrength ?? 0;
 
@@ -132,12 +133,19 @@ export function buildMtfZoneStack({
   raw.push(...extractExtraLevels(extras));
 
   const merged = mergeZoneLevels(raw, mergePips).filter((z) => z.strength >= minStrength);
-  const classified = classifyZonesAtPrice(price, merged, proximityPips);
+  // The SR map shown to the LLM covers only what this mode can trade (reach = max TP distance);
+  // all zones stay in `zones` for SL structure checks.
+  const inReach = reachPips == null || price == null
+    ? merged
+    : merged.filter((z) => Math.abs(toPips(z.price - price)) <= reachPips);
+  const classified = classifyZonesAtPrice(price, inReach, proximityPips);
 
   return {
     price,
     merge_pips: mergePips,
     proximity_pips: proximityPips,
+    reach_pips: reachPips,
+    beyond_reach: merged.length - inReach.length,
     timeframes,
     htf_bias: inferHtfBias(htfTrends),
     candles_available: Boolean(candles),
@@ -151,11 +159,14 @@ export function formatMtfZonesForPrompt(stack) {
   const lines = [
     "",
     `── MTF S/R ZONE STACK (fractal swings ${(stack.timeframes || []).join("/")} + PDH/PDL/PWH/PWL/Asian + monthly pivots) ──`,
-    `Price: ${stack.price ?? "?"} | HTF bias: ${stack.htf_bias}`,
+    `Price: ${stack.price ?? "?"} | HTF bias: ${stack.htf_bias}${stack.reach_pips != null ? ` | levels within ±${stack.reach_pips}p (trade reach)` : ""}`,
   ];
   if (!stack.candles_available) {
     lines.push("⚠ Candle history unavailable — only monthly pivots below; swing/session levels missing.");
   }
+
+  if (stack.reach_pips != null && !stack.nearestSupport) lines.push(`No support within ${stack.reach_pips}p below price.`);
+  if (stack.reach_pips != null && !stack.nearestResistance) lines.push(`No resistance within ${stack.reach_pips}p above price.`);
 
   for (const [label, z, at, dir] of [
     ["Nearest support", stack.nearestSupport, stack.atSupport, "below"],
@@ -175,6 +186,9 @@ export function formatMtfZonesForPrompt(stack) {
     }
   }
 
-  lines.push("Note: S/R levels are reference only — you choose setup_type, side, entry, and SL from structure.");
+  if (stack.beyond_reach) {
+    lines.push(`${stack.beyond_reach} farther level(s) omitted — beyond this mode's reach, not valid entries or targets.`);
+  }
+  lines.push("Note: S/R levels are reference only — you choose setup_type, side, entry, SL and TP from structure within reach.");
   return lines.join("\n");
 }

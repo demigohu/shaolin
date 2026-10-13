@@ -38,6 +38,8 @@ Yahoo's COMEX quote lags about 10 minutes, so the basis is measured at a shared 
 | day | 1D → 4h → 1h | 4h, 30 bars | 1h | 1d/4h/1h/15m | Asian, PD, PW | yes |
 | swing | 1W → 1D → 4h | 1D, 40 bars | 4h | 1w/1d/4h/1h | PD, PW | no |
 
+The SR map in the SCREENER prompt only lists zones within the mode's reach (`maxTpPips` from price); farther levels (PDH/PWH/...) are shown with their distance and marked "context only", so the model doesn't anchor entries/SL/TP on them. All zones stay available to the SL structure checks.
+
 Zone merge/proximity distance defaults to 8/5, 15/10 and 40/25 pips respectively. Override it per mode with `zoneMergePips` / `zoneProximityPips`. The Asian range only becomes a liquidity pool once it is complete (06:00 UTC).
 
 ## Session clock (DST-aware)
