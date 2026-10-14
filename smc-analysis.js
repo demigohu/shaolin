@@ -244,3 +244,66 @@ export function equalLevels(candles, tolPips, lookback = 96) {
   cluster(lows, "eql");
   return out;
 }
+
+/**
+ * Entry-timeframe trigger state (PDF: sweep → BMS → RTO), computed bar by bar:
+ * - swings: latest confirmed fractal highs/lows
+ * - sweeps: bars that wicked through a liquidity pool and closed back inside
+ * - bms: the most recent close through the latest confirmed swing (break in market structure)
+ * - ob: the last opposite candle before that break, and whether price has returned to it (RTO)
+ * - tape: the last bars, so the model can read the sequence itself
+ */
+export function ltfTriggerState(candles, pools = [], { lookback = 48, tapeBars = 12, sweepBars = 12 } = {}) {
+  const win = (candles || []).slice(-lookback);
+  if (win.length < 10) return null;
+  const last = win.length - 1;
+  const { highs, lows } = findFractals(win);
+
+  // A k=2 fractal at index f is only known once bar f+2 has closed.
+  let bms = null;
+  for (let i = 3; i < win.length; i++) {
+    const hi = highs.filter((f) => f.i <= i - 3).at(-1);
+    const lo = lows.filter((f) => f.i <= i - 3).at(-1);
+    if (hi && win[i].c > hi.price && win[i - 1].c <= hi.price) bms = { dir: "bullish", level: hi.price, i };
+    if (lo && win[i].c < lo.price && win[i - 1].c >= lo.price) bms = { dir: "bearish", level: lo.price, i };
+  }
+
+  let ob = null;
+  let rto = null;
+  if (bms) {
+    const wantBearCandle = bms.dir === "bullish";
+    for (let j = bms.i - 1; j >= Math.max(0, bms.i - 10); j--) {
+      const k = win[j];
+      if (wantBearCandle ? k.c < k.o : k.c > k.o) {
+        ob = { low: k.l, high: k.h };
+        break;
+      }
+    }
+    if (ob) {
+      const after = win.slice(bms.i + 1);
+      const failed = bms.dir === "bullish" ? after.some((k) => k.c < ob.low) : after.some((k) => k.c > ob.high);
+      const touched = bms.dir === "bullish" ? after.some((k) => k.l <= ob.high) : after.some((k) => k.h >= ob.low);
+      rto = failed ? "failed (closed through the OB)" : touched ? "touched" : "not yet";
+    }
+  }
+
+  const sweeps = [];
+  for (let i = Math.max(0, win.length - sweepBars); i < win.length; i++) {
+    const k = win[i];
+    for (const p of pools) {
+      if (p.low != null && k.l < p.low && k.c > p.low) sweeps.push({ pool: `${p.name} low ${p.low.toFixed(2)}`, side: "ssl", bars_ago: last - i, wick: k.l });
+      if (p.high != null && k.h > p.high && k.c < p.high) sweeps.push({ pool: `${p.name} high ${p.high.toFixed(2)}`, side: "bsl", bars_ago: last - i, wick: k.h });
+    }
+  }
+
+  return {
+    close: win[last].c,
+    swing_highs: highs.slice(-3).map((f) => ({ price: f.price, bars_ago: last - f.i })),
+    swing_lows: lows.slice(-3).map((f) => ({ price: f.price, bars_ago: last - f.i })),
+    bms: bms ? { dir: bms.dir, level: bms.level, bars_ago: last - bms.i, close: win[bms.i].c } : null,
+    ob,
+    rto,
+    sweeps: sweeps.slice(-4),
+    tape: win.slice(-tapeBars),
+  };
+}

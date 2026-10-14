@@ -6,7 +6,7 @@ import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { config } from "./config.js";
 import { getActiveMode, getModeIntervals, isSessionAllowed, isWeekendMarketClosed, switchMode } from "./modes.js";
-import { appendScreeningDecision } from "./screening-log.js";
+import { appendScreeningDecision, getRecentScreeningDecisions } from "./screening-log.js";
 import { getOpenSetups, getSetupsSummary, persistSetups, cancelSetup, cancelAllOpenSetups } from "./setups.js";
 import { evaluateSetup, evaluateExpiry } from "./management.js";
 import { recordSetupOutcome } from "./lessons.js";
@@ -30,7 +30,7 @@ import { formatAgentStatus } from "./status.js";
 import { formatPerformanceStats } from "./performance-stats.js";
 import { getSetupMemorySummary } from "./setup-memory.js";
 import { clearStagedSignals } from "./signal-tracker.js";
-import { cleanContent, parseVerdict } from "./verdict.js";
+import { cleanContent, parseVerdict, verdictReason } from "./verdict.js";
 import { getCalendarEvents, checkNewsBlackout, formatCalendarForPrompt, upcomingEvents, formatEvent } from "./tools/calendar.js";
 import { buildSMCContext, formatSMCForPrompt, getLastSMCContext } from "./smc.js";
 
@@ -395,10 +395,20 @@ async function runWatcher() {
   for (const t of triggers) _firedTriggers.set(t.key, Date.now());
   const text = triggers.map((t) => t.text).join("; ");
   log("watcher", `Trigger: ${text}`);
-  if (config.watcher?.notifyPoiTouch !== false && triggers.some((t) => t.kind === "poi")) {
+  const announce = config.watcher?.notifyPoiTouch !== false && triggers.some((t) => t.kind === "poi");
+  if (announce) {
     await sendMessage(`📍 ${triggers.filter((t) => t.kind === "poi").map((t) => t.text).join("\n")}\nScreening for a trigger now…`);
   }
-  await runScreeningCycle({ trigger: text });
+  const startedAt = Date.now();
+  const result = await runScreeningCycle({ trigger: text });
+  // Close the loop on the 📍 message (a logged setup already sent its own alert).
+  if (announce && typeof result === "string" && !result.startsWith("🥋 SHAOLIN SETUP")) {
+    const blockedNow = getRecentScreeningDecisions(10)
+      .filter((d) => d.action === "BLOCKED" && Date.parse(d.ts) >= startedAt)
+      .map((d) => `⛔ ${d.summary}`);
+    const verdict = parseVerdict(result);
+    await sendMessage([`↳ ${verdict} — ${verdictReason(result) || "no reason given"}`, ...blockedNow].join("\n"));
+  }
 }
 
 export function startCronJobs() {

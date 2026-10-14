@@ -13,6 +13,14 @@ export function cleanContent(content) {
  * fall back to the LAST uppercase verdict word — words like "SETUP checklist"
  * earlier in the analysis must not count as a SETUP decision.
  */
+/** Second line = the one-sentence reason the prompt asks for (what is missing / awaited). */
+export function verdictReason(content, max = 220) {
+  const lines = String(content || "").split("\n").map((l) => l.replace(/[*_#>`|]/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const first = lines[0] || "";
+  const rest = /^(SETUP|WATCH|AVOID)\b/.test(first) ? first.replace(/^(SETUP|WATCH|AVOID)\b[\s:—-]*/, "") || lines[1] || "" : first;
+  return rest.slice(0, max);
+}
+
 export function parseVerdict(content) {
   const text = String(content || "");
   const firstLine = text.split("\n").map((l) => l.replace(/[*_#>`\s]/g, " ").trim()).find(Boolean) || "";

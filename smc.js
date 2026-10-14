@@ -27,6 +27,7 @@ import {
   tradingDayStart,
   dayHighLow,
   equalLevels,
+  ltfTriggerState,
   swingRange,
   detectBos,
   findOrderBlocks,
@@ -144,21 +145,21 @@ export const STRUCTURE_PROFILES = {
   scalp: {
     tvTfs: ["5m", "15m", "1h", "4h"], htf: ["4h", "1h", "15m"], rsiTf: "15m",
     swing: { key: "h1", tf: "1h", lookback: 48 }, bos: { key: "m15", tf: "15m" }, ob: { key: "m15", tf: "15m" },
-    wick: { key: "m5", tf: "5m" }, sweep: { key: "m15", bars: 8 },
+    wick: { key: "m5", tf: "5m" }, sweep: { key: "m15", bars: 8 }, trigger: { key: "m5", tf: "5m" },
     zones: ["4h", "1h", "15m", "5m"], mergePips: 8, proximityPips: 5,
     pools: ["asian", "pd", "eq"], eq: [["m15", "15m"], ["h1", "1h"]], killzoneGate: true,
   },
   day: {
     tvTfs: ["15m", "1h", "4h", "1D"], htf: ["1D", "4h", "1h"], rsiTf: "1h",
     swing: { key: "h4", tf: "4h", lookback: 30 }, bos: { key: "h1", tf: "1h" }, ob: { key: "h1", tf: "1h" },
-    wick: { key: "m15", tf: "15m" }, sweep: { key: "h1", bars: 6 },
+    wick: { key: "m15", tf: "15m" }, sweep: { key: "h1", bars: 6 }, trigger: { key: "m15", tf: "15m" },
     zones: ["1d", "4h", "1h", "15m"], mergePips: 15, proximityPips: 10,
     pools: ["asian", "pd", "pw", "eq"], eq: [["h1", "1h"], ["h4", "4h"]], killzoneGate: true,
   },
   swing: {
     tvTfs: ["1h", "4h", "1D", "1W"], htf: ["1W", "1D", "4h"], rsiTf: "4h",
     swing: { key: "d1", tf: "1D", lookback: 40 }, bos: { key: "h4", tf: "4h" }, ob: { key: "h4", tf: "4h" },
-    wick: { key: "h1", tf: "1h" }, sweep: { key: "h4", bars: 6 },
+    wick: { key: "h1", tf: "1h" }, sweep: { key: "h4", bars: 6 }, trigger: { key: "h1", tf: "1h" },
     zones: ["1w", "1d", "4h", "1h"], mergePips: 40, proximityPips: 25,
     pools: ["pd", "pw", "pm", "eq"], eq: [["h4", "4h"], ["d1", "1D"]], killzoneGate: false,
   },
@@ -246,6 +247,7 @@ export async function buildSMCContext({ profileId = null, reachPips = undefined,
   };
   const swingTrend = tv[profile.swing.tf]?.market_structure?.trend;
   const fib = computeFibOte(swing, swingTrend || structure.bias, price);
+  const trigger = candles ? ltfTriggerState(withLiveBar(candles[profile.trigger.key], tv[profile.trigger.tf], profile.trigger.tf, nowMs), pools) : null;
   const orderBlocks = candles
     ? { ...findOrderBlocks(candles[profile.ob.key]), wick_rejection: wickRejection(candles[profile.wick.key]) }
     : null;
@@ -258,6 +260,7 @@ export async function buildSMCContext({ profileId = null, reachPips = undefined,
       ob_tf: profile.ob.tf,
       wick_tf: profile.wick.tf,
       rsi_tf: profile.rsiTf,
+      trigger_tf: profile.trigger.tf,
       killzone_gate: profile.killzoneGate,
     },
     wib: wib.label,
@@ -290,6 +293,7 @@ export async function buildSMCContext({ profileId = null, reachPips = undefined,
     swing,
     fib,
     order_blocks: orderBlocks,
+    trigger,
     liquidity_events: liquidity.events,
     liquidity_hints: liquidity.hints,
     suggested_setups: suggestPlaybooks(liquidity.events, amdPhase, structure.ltf_bos),
@@ -341,6 +345,49 @@ function lvl(ctx, v) {
   return `${fmt(v)} (${d >= 0 ? "+" : ""}${d}p${far ? ", context only" : ""})`;
 }
 
+const TF_MS = { "5m": 300_000, "15m": 900_000, "1h": 3_600_000 };
+
+/**
+ * Yahoo candles lag ~10 min and end with a partial bar at an odd timestamp. Drop that,
+ * and append TradingView's live bar for the trigger TF (spot, real time) so the most
+ * recent sweep/BMS is visible. Bars between Yahoo's last and the live one may be missing.
+ */
+export function withLiveBar(candles, tvAnalysis, tf, nowMs) {
+  const ms = TF_MS[tf];
+  if (!ms || !candles?.length) return candles;
+  const closed = candles.filter((k) => k.t % ms === 0);
+  const pd = tvAnalysis?.price_data;
+  const live = pd && [pd.open, pd.high, pd.low, pd.close].every((v) => Number.isFinite(Number(v)))
+    ? { t: Math.floor(nowMs / ms) * ms, o: Number(pd.open), h: Number(pd.high), l: Number(pd.low), c: Number(pd.close), live: true }
+    : null;
+  if (!live) return closed;
+  return [...closed.filter((k) => k.t < live.t), live];
+}
+
+const wibClock = (ms) => new Date(ms + 7 * 3_600_000).toISOString().slice(11, 16);
+
+/** Entry-TF trigger block: lets the model verify sweep → BMS → RTO instead of guessing. */
+function formatTrigger(ctx) {
+  const t = ctx.trigger;
+  const tf = ctx.profile.trigger_tf;
+  const out = ["", `── ${tf} TRIGGER DATA (closed + live bar; use this to confirm sweep → BMS → RTO) ──`];
+  out.push(`${tf} swing highs: ${t.swing_highs.map((s) => `${fmt(s.price)} (${s.bars_ago} bars ago)`).join(", ") || "none"}`);
+  out.push(`${tf} swing lows:  ${t.swing_lows.map((s) => `${fmt(s.price)} (${s.bars_ago} bars ago)`).join(", ") || "none"}`);
+  out.push(t.sweeps.length
+    ? `${tf} sweeps: ${t.sweeps.map((s) => `${s.side.toUpperCase()} ${s.pool} (wick ${fmt(s.wick)}, ${s.bars_ago} bars ago)`).join("; ")}`
+    : `${tf} sweeps: none in the last bars`);
+  if (t.bms) {
+    out.push(`${tf} BMS: ${t.bms.dir.toUpperCase()} — close ${fmt(t.bms.close)} through swing ${fmt(t.bms.level)}, ${t.bms.bars_ago} bars ago`);
+    if (t.ob) out.push(`${tf} OB that caused it: ${fmt(t.ob.low)}–${fmt(t.ob.high)} | RTO: ${t.rto}`);
+  } else {
+    out.push(`${tf} BMS: none yet in the window`);
+  }
+  out.push(`Last ${t.tape.length} ${tf} bars (WIB open, O/H/L/C), oldest → newest — history is ~10 min delayed, the final bar is LIVE from TradingView (a gap before it means bars not yet published):`);
+  for (const k of t.tape) out.push(`  ${wibClock(k.t)} ${fmt(k.o)} ${fmt(k.h)} ${fmt(k.l)} ${fmt(k.c)}${k.live ? "  ← live, still forming" : ""}`);
+  out.push(`A trigger is COMPLETE when these lines show it (e.g. sweep → ${tf} BMS → price back in the OB). Do not demand a confirmation that is already printed above.`);
+  return out;
+}
+
 export function formatSMCForPrompt(ctx) {
   if (!ctx) return "SMC disabled.";
   const lines = [
@@ -388,6 +435,8 @@ export function formatSMCForPrompt(ctx) {
     lines.push(`${ctx.profile.ob_tf} OB — bullish: ${zone(ob.bullish)} | bearish: ${zone(ob.bearish)}${ob.wick_rejection ? ` | last ${ctx.profile.wick_tf}: ${ob.wick_rejection}` : ""}`);
   }
   lines.push(`Trend ${Object.entries(ctx.htf).map(([tf, t]) => `${tf}: ${t}`).join(" | ")} | RSI ${ctx.ltf.rsi_tf} ${ctx.ltf.rsi ?? "?"}`);
+
+  if (ctx.trigger) lines.push(...formatTrigger(ctx));
 
   if (ctx.liquidity_events.length) {
     lines.push(`Liquidity: ${ctx.liquidity_events.join(", ")} — include liquidity_sweep in confluence for turtle soup`);

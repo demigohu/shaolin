@@ -158,3 +158,32 @@ test("previous month, trading-day HOD/LOD and equal highs/lows", async () => {
   const eq = equalLevels(ks, 10);
   assert.deepEqual(eq.filter((e) => e.kind === "eqh").map((e) => [e.price, e.touches]), [[2010.4, 2]]);
 });
+
+test("ltfTriggerState: SSL sweep, bullish BMS, OB and RTO", async () => {
+  const { ltfTriggerState } = await import("../smc-analysis.js");
+  // Downswing to a swing low, a sweep below the pool, then a bullish break of the last swing high and a pullback.
+  // idx 8 sweeps PDL 100 and closes back above; idx 10 is the swing high (104); idx 13 the last
+  // bearish candle (OB); idx 14 closes above 104 (bullish BMS); idx 15 pulls back into the OB (RTO).
+  const bars = [
+    [110, 111, 108, 109], [109, 110, 106, 107], [107, 108, 105, 106], [106, 107, 104, 105], [105, 106, 103, 104],
+    [104, 105, 102, 103], [103, 104, 101.5, 102], [102, 103, 101, 101.5], [101.5, 102, 99, 101.2], [101.2, 102.5, 100.5, 102],
+    [102, 104, 101.5, 103.5], [103.5, 103, 102.2, 102.8], [102.8, 102.8, 102.1, 102.6], [102.8, 103.2, 102, 102.1], [102.1, 106, 102, 105],
+    [105, 105.5, 102.9, 104.6],
+  ].map(([o, h, l, c], i) => candle(i * 300_000, o, h, l, c));
+  const s = ltfTriggerState(bars, [{ name: "PDL", low: 100 }]);
+  assert.equal(s.sweeps[0].side, "ssl");
+  assert.equal(s.bms.dir, "bullish");
+  assert.deepEqual(s.ob, { low: 102, high: 103.2 });
+  assert.equal(s.rto, "touched");
+});
+
+test("withLiveBar drops Yahoo's partial bar and appends the TradingView live bar", async () => {
+  const { withLiveBar } = await import("../smc.js");
+  const m5 = 300_000;
+  const yahoo = [candle(0, 1, 2, 0.5, 1.5), candle(m5, 1.5, 2.5, 1, 2), candle(m5 + 61_000, 2, 2.2, 1.9, 2.1)];
+  const now = 3 * m5 + 42_000;
+  const out = withLiveBar(yahoo, { price_data: { open: 2.4, high: 2.9, low: 2.3, close: 2.8 } }, "5m", now);
+  assert.deepEqual(out.map((k) => k.t), [0, m5, 3 * m5]);
+  assert.equal(out.at(-1).live, true);
+  assert.equal(withLiveBar(yahoo, null, "5m", now).length, 2, "no TV bar → closed bars only");
+});

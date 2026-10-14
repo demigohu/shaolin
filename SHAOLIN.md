@@ -34,7 +34,8 @@ Yahoo's COMEX quote lags about 10 minutes, so the basis is measured at a shared 
 
 1. **Plan** (`planner.js`) at `plan.times` WIB (default 06:30 / 13:30 / 18:30, Mon–Fri), on startup if none, and after invalidation (`replanCooldownMin`). The `llm.planningModel` reads a higher-timeframe structure view (scalp plans on the day profile) + the calendar and returns bias, invalidation levels and ≤5 POIs (zone, side, setups, trigger, targets). Saved in `plan-state.json` and pushed to Telegram; expires at the end of the trading day (18:00 New York).
 2. **Watcher** (`watcher.js`, every `watcher.intervalSec`, no LLM): voids the plan when price trades through its invalidation (and re-plans), and fires a screening when price reaches a POI or sweeps a liquidity pool (Asian / PD / PW / equal highs-lows), with a per-trigger cooldown.
-3. **Screener** runs on those triggers plus every `screeningIntervalMin`. The prompt carries the plan and the trigger; setups follow the PDF triggers only.
+3. **Screener** runs on those triggers plus every `screeningIntervalMin`. The prompt carries the plan, the trigger and a deterministic **entry-TF trigger block** (5m for scalp, 15m day, 1h swing): latest swings, pool sweeps, the last BMS with the OB that caused it and its RTO status, plus the last 12 bars (Yahoo history ~10 min delayed + TradingView's live bar). Without it the model cannot verify "5m BMS" and only ever answers WATCH. Setups follow the PDF triggers only.
+   When the watcher announces a POI touch (📍), the result is sent back as `↳ VERDICT — reason` (plus any gate rejections).
 4. **Grading** in `propose_setup`: **A** = entry inside a POI on its side (`plan_poi` added), **B** = off-plan (needs `plan.offPlanMinConfidence` and `offPlanMinConfluence`), **unplanned** = no active plan.
 
 Setups carry `strategy_version`, `grade`, `poi_id`, `plan_id`; `/stats` only counts the current `strategyVersion` and splits by grade.

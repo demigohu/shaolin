@@ -13,3 +13,9 @@ test("markdown-header answers: the last verdict word decides, not any SETUP ment
   assert.equal(parseVerdict("## Read\nAll confirmed.\nSETUP — entering P1 long"), "SETUP");
   assert.equal(parseVerdict("## Read\nnothing decided"), "WATCH");
 });
+
+test("verdictReason takes the one-line reason after the verdict", async () => {
+  const { verdictReason } = await import("../verdict.js");
+  assert.equal(verdictReason("WATCH\nP2: BSL sweep done, waiting for a 5m close below 4158.2 (BMS).\n## details"), "P2: BSL sweep done, waiting for a 5m close below 4158.2 (BMS).");
+  assert.equal(verdictReason("**WATCH** — price below P1, no reclaim yet"), "price below P1, no reclaim yet");
+});
