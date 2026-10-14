@@ -164,6 +164,7 @@ export async function runScreeningCycle({ silent = false, trigger = null } = {})
       `Run XAUUSD ${mode.label} screening.`,
       trigger ? `Triggered by: ${trigger}.` : "Periodic check.",
       "Is price at a plan POI / HTF key level, and has the LTF trigger (sweep / BMS / RTO) completed? SETUP only if yes, else WATCH with what you are waiting for.",
+      "REPLY FORMAT (strict): line 1 = exactly SETUP, WATCH or AVOID. Line 2 = one plain sentence: the trigger step still missing and the exact level/close you wait for (or why it is a setup). Then at most 6 short lines of detail — no headers, no tables.",
     ].join(" ");
 
     const onToolStart = ({ name, args }) => {
@@ -208,8 +209,9 @@ export async function runScreeningCycle({ silent = false, trigger = null } = {})
     }
 
     const action = parseVerdict(content) === "AVOID" ? "AVOID" : "WATCH";
-    log("screen", `Result: ${action} — ${content.replace(/\s+/g, " ").slice(0, 200)}`);
-    appendScreeningDecision({ action, summary: content?.slice(0, 200), reason: content?.slice(0, 500) });
+    const why = verdictReason(content) || content.replace(/\s+/g, " ").slice(0, 200);
+    log("screen", `Result: ${action} — ${why}`);
+    appendScreeningDecision({ action, summary: why, reason: content });
     const sendDigest = notify && config.notifications?.notifyScreeningDigest
       && _screenCycleCount % (config.notifications?.digestEveryScreeningCycles ?? 1) === 0
       && shouldNotifyTelegram("screening_digest");

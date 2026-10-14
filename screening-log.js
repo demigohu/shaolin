@@ -60,7 +60,7 @@ export function appendScreeningDecision(entry) {
     action: entry.action || null,
     setup_id: entry.setup_id || null,
     summary: sanitize(entry.summary),
-    reason: sanitize(entry.reason, 500),
+    reason: sanitize(entry.reason, 4000),
     risks: Array.isArray(entry.risks) ? entry.risks.map((r) => sanitize(r, 140)).filter(Boolean).slice(0, 6) : [],
     metrics: entry.metrics || {},
   };
@@ -81,7 +81,8 @@ export function getScreeningSummary(limit = 6) {
     const bits = [
       `${i + 1}. [${d.actor}] ${d.action || d.type}`,
       d.summary ? `summary: ${d.summary}` : null,
-      d.reason ? `reason: ${d.reason}` : null,
+      // Full answers are stored for review; keep the prompt history short.
+      d.reason && d.reason !== d.summary ? `reason: ${d.reason.slice(0, 160)}` : null,
       d.setup_id ? `setup: ${d.setup_id}` : null,
     ].filter(Boolean);
     return bits.join(" | ");
