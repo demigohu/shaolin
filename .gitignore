@@ -15,3 +15,4 @@ logs/
 screening-log.json
 *.tmp
 plan-state.json
+basis-state.json

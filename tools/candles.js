@@ -12,7 +12,9 @@
  * Yahoo 5m candle starting at the same timestamp.
  */
 
+import fs from "fs";
 import { proxyDispatcher, describeError, httpGet } from "./http.js";
+import { repoPath } from "../repo-root.js";
 import { config } from "../config.js";
 import { log } from "../logger.js";
 
@@ -23,8 +25,28 @@ const H4_MS = 4 * 60 * 60_000;
 const HOSTS = ["query1.finance.yahoo.com", "query2.finance.yahoo.com"];
 const PROXY_ATTEMPTS = 3;
 
+const BASIS_FILE = repoPath("basis-state.json");
 const cache = new Map();
-let lastBasis = null;
+
+// Persisted so a restart in the first ~10 min of an hour (before Yahoo publishes the
+// anchor candle) can still reuse a recent measurement.
+let lastBasis = (() => {
+  try {
+    const b = JSON.parse(fs.readFileSync(BASIS_FILE, "utf8"));
+    return Number.isFinite(b.basis) && Number.isFinite(b.at) ? b : null;
+  } catch {
+    return null;
+  }
+})();
+
+function rememberBasis(basis) {
+  lastBasis = { basis, at: Date.now() };
+  try {
+    fs.writeFileSync(BASIS_FILE, JSON.stringify(lastBasis));
+  } catch (error) {
+    log("candles_warn", `Could not persist basis: ${error.message}`);
+  }
+}
 
 /** Try each Yahoo host; through a proxy, each attempt uses a fresh session (another exit IP). */
 async function fetchChart(interval) {
@@ -147,7 +169,7 @@ export async function getSpotCandleSet(spotPrice, anchors = []) {
 
   let basis = measureBasis(m5.candles, anchors);
   if (basis != null) {
-    lastBasis = { basis, at: Date.now() };
+    rememberBasis(basis);
   } else {
     // First ~10 minutes of an hour: Yahoo hasn't published the anchor candle yet.
     basis = getRecentBasis();

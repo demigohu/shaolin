@@ -150,10 +150,12 @@ export async function runScreeningCycle({ silent = false, trigger = null } = {})
         log("smc_error", error.message);
       }
     }
-    // No live price → the answer can only be WATCH; don't spend an LLM call on it.
-    if (smcCtx && smcCtx.price == null) {
-      const msg = "WATCH — no live TradingView price this cycle (feed unavailable / rate-limited)";
-      appendScreeningDecision({ action: "WATCH", summary: msg, reason: "no_price" });
+    // No live price / no candle history → no trigger can be verified; don't spend an LLM call on it.
+    if (smcCtx && (smcCtx.price == null || !smcCtx.data.candles)) {
+      const msg = smcCtx.price == null
+        ? "WATCH — no live TradingView price this cycle (feed unavailable / rate-limited)"
+        : `WATCH — no candle history this cycle (${smcCtx.data.candle_error || "unavailable"}); triggers can't be verified`;
+      appendScreeningDecision({ action: "WATCH", summary: msg, reason: smcCtx.price == null ? "no_price" : "no_candles" });
       log("screen", msg);
       return msg;
     }
