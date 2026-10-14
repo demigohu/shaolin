@@ -1,6 +1,6 @@
 {
   "activeMode": "scalp",
-  "strategyVersion": "v1.1-pdf",
+  "strategyVersion": "v1.2-pdf",
   "market": {
     "dataSymbol": "XAUUSD",
     "dataExchange": "TVC",

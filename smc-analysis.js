@@ -35,10 +35,14 @@ export function previousDayHL(d1, now = Date.now()) {
 }
 
 /** Previous completed week's H/L from daily bars (weeks split on Monday UTC). */
+// Daily bars are dated by session: a gold session opening Sunday 22:00 UTC is Monday's.
+// Shifting by 12h maps session opens (22–23h UTC) and midnight-dated bars to the right day.
+const SESSION_DATE_SHIFT = 12 * 3_600_000;
+
 export function previousWeekHL(d1, now = Date.now()) {
   if (!d1?.length) return { pwh: null, pwl: null };
   const weekStart = (t) => {
-    const d = new Date(t);
+    const d = new Date(t + SESSION_DATE_SHIFT);
     const dow = (d.getUTCDay() + 6) % 7;
     return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - dow);
   };
@@ -192,7 +196,7 @@ export function previousMonthHL(d1, now = Date.now()) {
   const n = new Date(now);
   const thisMonth = Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), 1);
   const lastMonth = Date.UTC(n.getUTCFullYear(), n.getUTCMonth() - 1, 1);
-  const bars = d1.filter((k) => k.t >= lastMonth && k.t < thisMonth);
+  const bars = d1.filter((k) => k.t + SESSION_DATE_SHIFT >= lastMonth && k.t + SESSION_DATE_SHIFT < thisMonth);
   if (!bars.length) return { pmh: null, pml: null };
   return { pmh: Math.max(...bars.map((k) => k.h)), pml: Math.min(...bars.map((k) => k.l)) };
 }
@@ -203,6 +207,28 @@ export function tradingDayStart(now, nyOffsetHours) {
   let start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 18 - nyOffsetHours);
   while (start > now) start -= 24 * 3_600_000;
   return start;
+}
+
+/**
+ * Daily bars on the gold session (18:00 → 17:00 New York) built from 1h candles,
+ * so PDH/PDL match the broker's daily candle. `nyOffsetAt(t)` = New York UTC offset
+ * (hours) at time t. A leading partial session (window started mid-session) is dropped.
+ */
+export function sessionDailies(h1, nyOffsetAt) {
+  const out = [];
+  for (const k of h1 || []) {
+    const start = tradingDayStart(k.t, nyOffsetAt(k.t));
+    const cur = out.at(-1);
+    if (cur && cur.t === start) {
+      cur.h = Math.max(cur.h, k.h);
+      cur.l = Math.min(cur.l, k.l);
+      cur.c = k.c;
+    } else {
+      out.push({ t: start, o: k.o, h: k.h, l: k.l, c: k.c, firstBar: k.t });
+    }
+  }
+  if (out.length && out[0].firstBar > out[0].t) out.shift();
+  return out.map(({ firstBar, ...bar }) => bar);
 }
 
 /** High/low of the current trading day so far (HOD/LOD). */

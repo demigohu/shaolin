@@ -274,6 +274,7 @@ export async function buildSMCContext({ profileId = null, reachPips = undefined,
     data: {
       feed: config.market.feedLabel,
       candles: Boolean(candles),
+      candle_source: candles?.source ?? null,
       basis: candles?.basis ?? null,
       candle_error: candleError,
     },
@@ -317,7 +318,7 @@ export async function buildSMCContext({ profileId = null, reachPips = undefined,
     context.ltf.nearest_resistance = context.mtf_zones.nearestResistance?.price ?? null;
   }
 
-  log("smc", `Context [${mode.id}${profileId ? `/${profileId} view` : ""}] ${wib.label} ${amdPhase} price=${price} basis=${candles?.basis ?? "?"} events=${liquidity.events.join(",") || "none"}`);
+  log("smc", `Context [${mode.id}${profileId ? `/${profileId} view` : ""}] ${wib.label} ${amdPhase} price=${price} candles=${candles?.source ?? "none"} basis=${candles?.basis ?? "?"} events=${liquidity.events.join(",") || "none"}`);
   if (store) _lastSMCContext = context;
   return context;
 }
@@ -382,7 +383,9 @@ function formatTrigger(ctx) {
   } else {
     out.push(`${tf} BMS: none yet in the window`);
   }
-  out.push(`Last ${t.tape.length} ${tf} bars (WIB open, O/H/L/C), oldest → newest — history is ~10 min delayed, the final bar is LIVE from TradingView (a gap before it means bars not yet published):`);
+  out.push(ctx.data.candle_source === "twelvedata"
+    ? `Last ${t.tape.length} ${tf} bars (WIB open, O/H/L/C), oldest → newest — the final bar is LIVE and still forming:`
+    : `Last ${t.tape.length} ${tf} bars (WIB open, O/H/L/C), oldest → newest — history is ~10 min delayed, the final bar is LIVE from TradingView (a gap before it means bars not yet published):`);
   for (const k of t.tape) out.push(`  ${wibClock(k.t)} ${fmt(k.o)} ${fmt(k.h)} ${fmt(k.l)} ${fmt(k.c)}${k.live ? "  ← live, still forming" : ""}`);
   out.push(`A trigger is COMPLETE when these lines show it (e.g. sweep → ${tf} BMS → price back in the OB). Do not demand a confirmation that is already printed above.`);
   return out;
@@ -401,7 +404,9 @@ export function formatSMCForPrompt(ctx) {
   if (!ctx.data.candles) {
     lines.push(`⚠ CANDLE HISTORY UNAVAILABLE (${ctx.data.candle_error || "no price"}) — PDH/PDL, Asian range, swings, fib and OBs are missing. Prefer WATCH.`);
   } else {
-    lines.push(`Levels from Yahoo ${config.market.yahooSymbol} candles shifted by basis ${ctx.data.basis} onto spot.`);
+    lines.push(ctx.data.candle_source === "twelvedata"
+      ? `Levels from Twelve Data XAU/USD spot candles (real time, offset ${ctx.data.basis} to ${ctx.data.feed}).`
+      : `Levels from Yahoo ${config.market.yahooSymbol} candles shifted by basis ${ctx.data.basis} onto spot (history ~10 min delayed).`);
   }
 
   if (ctx.asian_range) {

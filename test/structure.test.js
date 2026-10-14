@@ -187,3 +187,41 @@ test("withLiveBar drops Yahoo's partial bar and appends the TradingView live bar
   assert.equal(out.at(-1).live, true);
   assert.equal(withLiveBar(yahoo, null, "5m", now).length, 2, "no TV bar → closed bars only");
 });
+
+test("parseTwelveData: UTC datetimes, ascending order, errors surface", async () => {
+  const { parseTwelveData } = await import("../tools/candles.js");
+  const ks = parseTwelveData({ status: "ok", values: [
+    { datetime: "2026-10-14 18:15:00", open: "4089.01", high: "4092.1", low: "4089.0", close: "4091.79" },
+    { datetime: "2026-10-14 18:10:00", open: "4085.5", high: "4090.7", low: "4085.2", close: "4090.2" },
+  ] });
+  assert.deepEqual(ks.map((k) => new Date(k.t).toISOString()), ["2026-10-14T18:10:00.000Z", "2026-10-14T18:15:00.000Z"]);
+  assert.equal(parseTwelveData({ status: "ok", values: [{ datetime: "2026-10-14", open: "1", high: "2", low: "0.5", close: "1.5" }] })[0].t, Date.parse("2026-10-14T00:00:00Z"));
+  assert.throws(() => parseTwelveData({ code: 429, message: "You have run out of API credits", status: "error" }), /API credits/);
+});
+
+test("sessionDailies: 18:00 New York sessions; weekly/PDH on session dates", async () => {
+  const { sessionDailies, previousDayHL, previousWeekHL } = await import("../smc-analysis.js");
+  const H = 3_600_000;
+  const edt = () => -4;
+  // Mon 12 Oct session opens Sun 11 Oct 22:00 UTC (EDT). Start the 1h window mid-session on Fri 9 Oct.
+  const start = Date.parse("2026-10-09T15:00:00Z");
+  const h1 = [];
+  for (let i = 0; i < 24 * 5; i++) {
+    const t = start + i * H;
+    const wd = new Date(t).getUTCDay();
+    const hr = new Date(t).getUTCHours();
+    const closed = (wd === 5 && hr >= 21) || wd === 6 || (wd === 0 && hr < 22);
+    if (closed) continue;
+    h1.push(candle(t, 100, 100 + (i % 7), 100 - (i % 5), 100));
+  }
+  const days = sessionDailies(h1, edt);
+  assert.equal(new Date(days[0].t).toISOString(), "2026-10-11T22:00:00.000Z", "partial Friday session dropped; Monday session opens Sunday 22:00 UTC");
+  assert.ok(days.every((d) => new Date(d.t).getUTCHours() === 22));
+  const now = Date.parse("2026-10-13T10:00:00Z"); // Tuesday session in progress
+  const { pdh, pdl } = previousDayHL(days, now);
+  const mon = h1.filter((k) => k.t >= days[0].t && k.t < days[1].t);
+  assert.deepEqual([pdh, pdl], [Math.max(...mon.map((k) => k.h)), Math.min(...mon.map((k) => k.l))]);
+  // Week of Mon 12 Oct: a Friday 9 Oct UTC daily is "previous week" from Tue 13 Oct.
+  const pw = previousWeekHL([candle(Date.parse("2026-10-09T00:00:00Z"), 1, 7, 3, 1), ...days], now);
+  assert.deepEqual(pw, { pwh: 7, pwl: 3 });
+});

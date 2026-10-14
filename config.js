@@ -107,7 +107,7 @@ const m = u.management || {};
 export const config = {
   activeMode: u.activeMode ?? "scalp",
   // Bump when the rules change; stats and the performance gate only count the current version.
-  strategyVersion: u.strategyVersion ?? "v1.1-pdf",
+  strategyVersion: u.strategyVersion ?? "v1.2-pdf",
   market: {
     dataSymbol: u.dataSymbol ?? u.market?.dataSymbol ?? "XAUUSD",
     dataExchange: u.dataExchange ?? u.market?.dataExchange ?? "TVC",

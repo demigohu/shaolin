@@ -1,8 +1,9 @@
 /**
  * OHLC history for structure levels (PDH/PDL, Asian range, swings, OBs).
  *
- * The TradingView MCP only exposes the CURRENT bar + monthly pivots, so real
- * candle history comes from Yahoo's chart API (GC=F futures). Futures trade at a
+ * The TradingView MCP only exposes the CURRENT bar + monthly pivots, so candle
+ * history comes from Twelve Data (XAU/USD spot, real time) when TWELVEDATA_API_KEY
+ * is set, with Yahoo's chart API (GC=F futures) as the fallback. Futures trade at a
  * basis to spot (TVC:GOLD, what the agent screens/manages on), so every candle is
  * shifted by that basis.
  *
@@ -15,6 +16,8 @@
 import fs from "fs";
 import { proxyDispatcher, describeError, httpGet } from "./http.js";
 import { repoPath } from "../repo-root.js";
+import { sessionDailies } from "../smc-analysis.js";
+import { tzOffsetHours } from "../smc-sessions.js";
 import { config } from "../config.js";
 import { log } from "../logger.js";
 
@@ -127,7 +130,8 @@ export function aggregateCandles(candles, bucketMs) {
 export function aggregateWeekly(candles) {
   const out = [];
   for (const k of candles) {
-    const d = new Date(k.t);
+    // +12h: session-dated bars opening Sunday 22:00 UTC belong to Monday's week.
+    const d = new Date(k.t + 12 * 3_600_000);
     const t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
     const cur = out.at(-1);
     if (cur && cur.t === t) {
@@ -154,13 +158,102 @@ export function measureBasis(m5Candles, anchors) {
   return null;
 }
 
+// ── Twelve Data (XAU/USD spot, real time) ────────────────────────────────────
+// Free plan: 800 credits/day, 8/min, 1 credit per request. One 5min series feeds
+// 5m + 15m, one 1h series feeds 1h + 4h, the daily series feeds PDH/PWH/PMH.
+const TD_URL = "https://api.twelvedata.com/time_series";
+const TD_SERIES = {
+  "5min": { size: 600, ttl: 60_000 },
+  "1h": { size: 400, ttl: 300_000 },
+  "1day": { size: 400, ttl: 30 * 60_000 },
+};
+const M15_MS = 15 * 60_000;
+const MAX_SPOT_GAP = 10; // $ — larger means one of the feeds is wrong
+
+/** Twelve Data `values` (UTC datetimes, strings) → ascending candles. */
+export function parseTwelveData(json) {
+  if (json?.status !== "ok" || !Array.isArray(json.values)) {
+    throw new Error(json?.message || `unexpected response (${json?.code ?? "no status"})`);
+  }
+  return json.values
+    .map((v) => ({
+      t: Date.parse(`${String(v.datetime).replace(" ", "T")}${String(v.datetime).length <= 10 ? "T00:00:00" : ""}Z`),
+      o: Number(v.open),
+      h: Number(v.high),
+      l: Number(v.low),
+      c: Number(v.close),
+    }))
+    .filter((k) => [k.t, k.o, k.h, k.l, k.c].every(Number.isFinite))
+    .sort((a, b) => a.t - b.t);
+}
+
+async function fetchTwelveData(interval) {
+  const key = `td:${interval}`;
+  const spec = TD_SERIES[interval];
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < spec.ttl) return hit.candles;
+  const params = new URLSearchParams({
+    symbol: "XAU/USD",
+    interval,
+    outputsize: String(spec.size),
+    timezone: "UTC",
+    apikey: process.env.TWELVEDATA_API_KEY,
+  });
+  const res = await httpGet(`${TD_URL}?${params}`);
+  const candles = parseTwelveData(await res.json().catch(() => ({})));
+  cache.set(key, { at: Date.now(), candles });
+  return candles;
+}
+
+async function twelveDataCandleSet(spotPrice) {
+  const m5 = await fetchTwelveData("5min");
+  const h1 = await fetchTwelveData("1h");
+  const d1 = await fetchTwelveData("1day");
+  // Both feeds are spot and real time: the residual gap is a small, live-measured offset.
+  let basis = m5.length ? m5.at(-1).c - spotPrice : 0;
+  if (Math.abs(basis) > MAX_SPOT_GAP) {
+    log("candles_warn", `Twelve Data vs feed gap ${basis.toFixed(2)} too large — using 0`);
+    basis = 0;
+  }
+  const h1Spot = shiftCandles(h1, basis);
+  const m5Spot = shiftCandles(m5, basis);
+  // Twelve Data dailies close at 00:00 UTC; gold sessions close 17:00 New York. Rebuild the
+  // recent days from 1h on session boundaries (PDH/PDL/PWH/PWL match the broker), and keep
+  // older UTC dailies only for monthly levels beyond the 1h window.
+  const sessions = sessionDailies(h1Spot, (t) => tzOffsetHours("America/New_York", new Date(t)));
+  const firstSession = sessions[0]?.t ?? Infinity;
+  const d1Spot = [...shiftCandles(d1, basis).filter((k) => k.t < firstSession), ...sessions];
+  return {
+    source: "twelvedata",
+    basis: Number(basis.toFixed(2)),
+    m5: m5Spot,
+    m15: aggregateCandles(m5Spot, M15_MS),
+    h1: h1Spot,
+    h4: aggregateCandles(h1Spot, H4_MS),
+    d1: d1Spot,
+    w1: aggregateWeekly(d1Spot),
+  };
+}
+
 /**
- * Fetch 5m/15m/1h/1d futures candles and shift them onto the spot feed.
- * Returns null when no basis can be established.
+ * Candle history on the spot feed: Twelve Data (real time) when TWELVEDATA_API_KEY
+ * is set, otherwise — or if it fails (credits, outage) — Yahoo GC=F shifted by the
+ * futures→spot basis. Returns null when spot price is unknown.
  */
 export async function getSpotCandleSet(spotPrice, anchors = []) {
   if (spotPrice == null) return null;
+  if (process.env.TWELVEDATA_API_KEY) {
+    try {
+      return await twelveDataCandleSet(spotPrice);
+    } catch (error) {
+      log("candles_warn", `Twelve Data failed (${error.message}) — falling back to Yahoo`);
+    }
+  }
+  return yahooCandleSet(spotPrice, anchors);
+}
 
+/** Yahoo GC=F futures candles shifted onto the spot feed (history ~10 min delayed). */
+async function yahooCandleSet(spotPrice, anchors) {
   // Sequential — Yahoo throttles bursts from VPS IPs.
   const m5 = await fetchCandles("5m");
   const m15 = await fetchCandles("15m");
@@ -180,6 +273,7 @@ export async function getSpotCandleSet(spotPrice, anchors = []) {
   const h1Spot = shiftCandles(h1.candles, basis);
   const d1Spot = shiftCandles(d1.candles, basis);
   return {
+    source: "yahoo",
     basis: Number(basis.toFixed(2)),
     m5: shiftCandles(m5.candles, basis),
     m15: shiftCandles(m15.candles, basis),
