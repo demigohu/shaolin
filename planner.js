@@ -111,6 +111,7 @@ Produce up to ${MAX_POIS} POIs (points of interest) for today:
 - Side = the trade you would take there (long at SSL/demand, short at BSL/supply), with the setup types and the exact trigger to wait for.
 - Targets = the opposite liquidity, nearest first.
 - Prefer POIs aligned with the HTF bias; include at most one counter-bias liquidity-raid POI.
+- A long zone and a short zone must NEVER overlap or sit within ${Math.round(reach / 8)} pips of each other — pick the side the structure favours there.
 - Invalidation: the price beyond which your bias/plan is wrong.
 Never invent levels that are not in the data. Call submit_plan exactly once.`;
 }
@@ -118,6 +119,7 @@ Never invent levels that are not in the data. Call submit_plan exactly once.`;
 /** Clean model output into a plan: drop malformed / out-of-reach POIs, order zones, cap widths. */
 export function sanitizePlan(raw, { price, reach }) {
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const minGap = (reach / 8) * (config.broker.pipSize || 0.1);
   const pois = [];
   for (const p of Array.isArray(raw?.pois) ? raw.pois : []) {
     let lo = num(p.zone_low);
@@ -126,6 +128,8 @@ export function sanitizePlan(raw, { price, reach }) {
     if (lo > hi) [lo, hi] = [hi, lo];
     if (toPips(hi - lo) > reach / 4) continue;
     if (price != null && Math.min(Math.abs(toPips(lo - price)), Math.abs(toPips(hi - price))) > reach) continue;
+    // Opposite-side zones that overlap (or nearly) make every trigger ambiguous — keep the earlier, higher-priority one.
+    if (pois.some((q) => q.side !== p.side && lo <= q.zone_high + minGap && hi >= q.zone_low - minGap)) continue;
     pois.push({
       id: `P${pois.length + 1}`,
       side: p.side,
@@ -236,7 +240,8 @@ export function matchPoi(plan, side, entry, tolPips) {
  */
 export function gradeSetup(args, plan, mode, validConfluence) {
   if (!plan) return { ok: true, grade: "unplanned" };
-  const poi = matchPoi(plan, args.side, Number(args.entry), mode.entryZonePips ?? 3);
+  // The OB that caused the BMS usually sits just outside the POI zone, so allow a margin.
+  const poi = matchPoi(plan, args.side, Number(args.entry), Math.max(mode.entryZonePips ?? 3, config.plan?.poiTolerancePips ?? 30));
   if (poi) return { ok: true, grade: "A", poi_id: poi.id, plan_id: plan.id };
 
   const minConf = config.plan?.offPlanMinConfidence ?? 75;

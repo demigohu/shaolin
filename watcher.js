@@ -56,6 +56,13 @@ export function poolsFromContext(ctx) {
   return pools;
 }
 
+/** Plain description of where price sits relative to a zone, computed (not left to the model). */
+export function priceVsZone(price, zone) {
+  if (price == null || !zone) return "price unknown";
+  if (price >= zone.low && price <= zone.high) return `price ${price} is INSIDE it now`;
+  return price > zone.high ? `price ${price} is ${toPips(price - zone.high)}p above it` : `price ${price} is ${toPips(zone.low - price)}p below it`;
+}
+
 /**
  * Trigger completion after a POI touch: a fresh entry-TF BMS in the POI's direction
  * (bullish for long POIs, bearish for short) while price reached the zone in the
@@ -65,7 +72,7 @@ export function poolsFromContext(ctx) {
  * @param state  ltfTriggerState() result
  * @param maxBarsAgo how fresh the BMS must be
  */
-export function detectBmsTriggers({ state, pois = [], lastFired = new Map(), cooldownMs = 60 * 60_000, now = Date.now(), maxBarsAgo = 2 }) {
+export function detectBmsTriggers({ state, pois = [], price = null, lastFired = new Map(), cooldownMs = 30 * 60_000, now = Date.now(), maxBarsAgo = 2, tolerancePips = 30 }) {
   const bms = state?.bms;
   if (!bms || bms.bars_ago > maxBarsAgo) return [];
   const recent = state.tape || [];
@@ -77,12 +84,20 @@ export function detectBmsTriggers({ state, pois = [], lastFired = new Map(), coo
       ? recent.some((k) => k.l <= p.zone_high)
       : recent.some((k) => k.h >= p.zone_low);
     if (!reached) continue;
-    const key = `bms:${p.id}:${bms.level.toFixed(2)}`;
+    // The RTO must still be at the POI: an OB far from the zone is the next leg, not this setup.
+    if (state.ob) {
+      const gap = p.side === "long" ? toPips(state.ob.low - p.zone_high) : toPips(p.zone_low - state.ob.high);
+      if (gap > tolerancePips) continue;
+    }
+    // One completion alert per POI per cooldown — every minor swing prints a new BMS level.
+    const key = `bms:${p.id}`;
     if (now - (lastFired.get(key) ?? 0) < cooldownMs) continue;
-    const ob = state.ob ? ` — RTO zone (OB) ${state.ob.low.toFixed(2)}–${state.ob.high.toFixed(2)}, RTO ${state.rto}` : "";
+    const ob = state.ob ? ` — RTO zone (OB) ${state.ob.low.toFixed(2)}–${state.ob.high.toFixed(2)} (${priceVsZone(price, state.ob)})` : "";
     out.push({
       key,
       kind: "bms",
+      poi: p,
+      ob: state.ob,
       text: `plan ${p.id} ${p.side.toUpperCase()}: price reached the zone and a ${bms.dir} BMS closed through ${bms.level.toFixed(2)} (${bms.bars_ago} bars ago)${ob}`,
     });
   }

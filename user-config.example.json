@@ -133,6 +133,7 @@
     "times": ["06:30", "13:30", "18:30"],
     "offPlanMinConfidence": 75,
     "offPlanMinConfluence": 3,
+    "poiTolerancePips": 30,
     "replanCooldownMin": 60,
     "notifyTelegram": true
   },

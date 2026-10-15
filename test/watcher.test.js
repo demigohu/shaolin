@@ -42,9 +42,22 @@ test("detectBmsTriggers: fresh BMS in the POI direction after price reached the 
   const tape = [{ h: 4153, l: 4148.0 }, { h: 4156, l: 4151 }];
   const state = { bms: { dir: "bullish", level: 4154.9, bars_ago: 1 }, ob: { low: 4152.3, high: 4154.6 }, rto: "not yet", tape };
   const t = detectBmsTriggers({ state, pois });
-  assert.deepEqual(t.map((x) => x.key), ["bms:P1:4154.90"]);
+  assert.deepEqual(t.map((x) => x.key), ["bms:P1"]);
   assert.match(t[0].text, /RTO zone \(OB\) 4152.30–4154.60/);
   assert.equal(detectBmsTriggers({ state: { ...state, bms: { ...state.bms, bars_ago: 5 } }, pois }).length, 0, "stale BMS");
   assert.equal(detectBmsTriggers({ state: { ...state, tape: [{ h: 4160, l: 4156 }] }, pois }).length, 0, "zone never reached");
-  assert.equal(detectBmsTriggers({ state, pois, lastFired: new Map([["bms:P1:4154.90", Date.now()]]) }).length, 0, "cooldown");
+  assert.equal(detectBmsTriggers({ state, pois, lastFired: new Map([["bms:P1", Date.now()]]) }).length, 0, "cooldown per POI");
+  const farOb = { ...state, ob: { low: 4156.9, high: 4158.9 } };
+  assert.equal(detectBmsTriggers({ state: farOb, pois }).length, 0, "OB 42p above the zone is the next leg");
+});
+
+test("BMS triggers carry the POI, the OB and a computed price-vs-OB relation", async () => {
+  const { detectBmsTriggers, priceVsZone } = await import("../watcher.js");
+  const pois = [{ id: "P4", side: "long", zone_low: 4148.46, zone_high: 4152.69 }];
+  const state = { bms: { dir: "bullish", level: 4154.64, bars_ago: 0 }, ob: { low: 4154.12, high: 4158.10 }, rto: "not yet", tape: [{ h: 4153, l: 4150 }] };
+  const [t] = detectBmsTriggers({ state, pois, price: 4155.57 });
+  assert.equal(t.poi.id, "P4");
+  assert.deepEqual(t.ob, { low: 4154.12, high: 4158.10 });
+  assert.match(t.text, /price 4155.57 is INSIDE it now/);
+  assert.equal(priceVsZone(4160, { low: 4154, high: 4158 }), "price 4160 is 20p above it");
 });

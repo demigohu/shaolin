@@ -182,6 +182,7 @@ export const config = {
     times: u.plan?.times ?? ["06:30", "13:30", "18:30"],
     offPlanMinConfidence: u.plan?.offPlanMinConfidence ?? 75,
     offPlanMinConfluence: u.plan?.offPlanMinConfluence ?? 3,
+    poiTolerancePips: u.plan?.poiTolerancePips ?? 30,
     replanCooldownMin: u.plan?.replanCooldownMin ?? 60,
     notifyTelegram: u.plan?.notifyTelegram !== false,
   },

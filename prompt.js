@@ -45,7 +45,7 @@ PREFETCH ACTIVE — SMC + MTF SNR map loaded above.
 
 ROLE: SCREENER — "Market Structure and Powerful Setups": HTF key levels, LTF triggers.
 You are the trader. YOU decide entry, SL and TP from structure — not from config templates.
-${context.trigger ? `\nTHIS CYCLE WAS TRIGGERED BY: ${context.trigger}\nJudge whether the trigger completes a setup right now, or what still has to happen.\n` : ""}
+${context.trigger ? `\nTHIS CYCLE WAS TRIGGERED BY: ${context.trigger}\nIf it says a BMS closed after price reached a plan zone, the trigger is COMPLETE — place the RTO limit at the OB (see the task). Otherwise judge what still has to happen.\n` : ""}
 ${context.planSummary || ""}
 
 ${prefetchBlock}

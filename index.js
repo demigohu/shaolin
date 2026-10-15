@@ -85,7 +85,20 @@ function extractLastSetupFromMessages(messages) {
   return null;
 }
 
-export async function runScreeningCycle({ silent = false, trigger = null } = {}) {
+/** Task text for a completed plan trigger: propose the RTO limit unless something concrete invalidates it. */
+function completedTriggerTask(t, mode) {
+  const side = t.poi.side;
+  const ob = t.ob ? `${t.ob.low.toFixed(2)}–${t.ob.high.toFixed(2)}` : "the OB in the trigger data";
+  return [
+    `TRIGGER COMPLETE for plan ${t.poi.id} ${side.toUpperCase()} (${t.poi.level_type}): ${t.text}.`,
+    `Default action: SETUP — call propose_setup with entry_style "limit", entry inside the OB ${ob} (${side === "long" ? "at/below" : "at/above"} live price; if price is already inside the OB, entry at/near price),`,
+    `SL beyond the OB / sweep extreme (${mode.minSlPips ?? "?"}–${mode.maxSlPips ?? "?"}p), TP1 at the BMS swing / opposite liquidity (plan targets: ${t.poi.targets?.join(", ") || "see plan"}), setup_type sh_bms_rto, sms_bms_rto or turtle_soup to match, plan_poi in confluence.`,
+    "The limit order does the waiting: 'price has not pulled back into the OB yet' is NOT a reason to WATCH.",
+    "WATCH/AVOID only for a concrete invalidation: price already closed beyond the OB's far side or the SL level, RR below minimum within the TP limit, or a news blackout.",
+  ].join(" ");
+}
+
+export async function runScreeningCycle({ silent = false, trigger = null, completed = [] } = {}) {
   if (_screeningBusy) {
     log("screen", "Screening skipped — previous cycle still running");
     return "Screening already running.";
@@ -168,8 +181,12 @@ export async function runScreeningCycle({ silent = false, trigger = null } = {})
 
     const goal = [
       `Run XAUUSD ${mode.label} screening.`,
-      trigger ? `Triggered by: ${trigger}.` : "Periodic check.",
-      "Is price at a plan POI / HTF key level, and has the LTF trigger (sweep / BMS / RTO) completed? SETUP only if yes, else WATCH with what you are waiting for.",
+      ...(completed.length
+        ? [completedTriggerTask(completed[0], mode)]
+        : [
+          trigger ? `Triggered by: ${trigger}.` : "Periodic check.",
+          "Is price at a plan POI / HTF key level, and has the LTF trigger (sweep / BMS / RTO) completed? SETUP only if yes, else WATCH with what you are waiting for.",
+        ]),
       "REPLY FORMAT (strict): line 1 = exactly SETUP, WATCH or AVOID. Line 2 = one plain sentence: the trigger step still missing and the exact level/close you wait for (or why it is a setup). Then at most 6 short lines of detail — no headers, no tables.",
     ].join(" ");
 
@@ -419,7 +436,14 @@ async function runWatcher() {
       // The watcher only holds TradingView's 5m bar; other trigger TFs go without a live bar.
       const live = profile.trigger.tf === "5m" ? m5 : null;
       const state = ltfTriggerState(withLiveBar(entry, live, profile.trigger.tf, Date.now()), pools);
-      triggers.push(...detectBmsTriggers({ state, pois, lastFired: _firedTriggers }));
+      triggers.push(...detectBmsTriggers({
+        state,
+        pois,
+        price,
+        lastFired: _firedTriggers,
+        cooldownMs: (config.watcher?.cooldownMin ?? 30) * 60_000,
+        tolerancePips: config.plan?.poiTolerancePips ?? 30,
+      }));
     }
   }
   if (!triggers.length) return;
@@ -434,7 +458,9 @@ async function runWatcher() {
     await sendMessage(`${lines.join("\n")}\nScreening for a trigger now…`);
   }
   const startedAt = Date.now();
-  const result = await runScreeningCycle({ trigger: text });
+  // A completed BMS trigger takes priority over plain POI touches in the same minute.
+  const completed = triggers.filter((t) => t.kind === "bms");
+  const result = await runScreeningCycle({ trigger: completed.length ? completed.map((t) => t.text).join("; ") : text, completed });
   // Close the loop on the 📍 message (a logged setup already sent its own alert).
   if (announce && typeof result === "string" && !result.startsWith("🥋 SHAOLIN SETUP")) {
     const blockedNow = getRecentScreeningDecisions(10)

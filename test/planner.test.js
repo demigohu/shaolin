@@ -38,3 +38,20 @@ test("matchPoi / gradeSetup: A at POI on its side, B off-plan needs more, unplan
   assert.equal(gradeSetup({ side: "long", entry: 4160, confidence: 80 }, plan, mode, ["htf_bias", "bms", "fib_ote"]).grade, "B");
   assert.equal(gradeSetup({ side: "long", entry: 4160, confidence: 60 }, null, mode, []).grade, "unplanned");
 });
+
+test("an OB just outside the POI zone still grades A (poiTolerancePips)", () => {
+  config.plan.poiTolerancePips = 30;
+  const plan = { id: "plan-2", pois: [{ id: "P4", side: "long", zone_low: 4148.46, zone_high: 4152.69 }] };
+  assert.equal(gradeSetup({ side: "long", entry: 4155.0, confidence: 70 }, plan, mode, ["htf_bias", "bms"]).grade, "A");
+  assert.equal(gradeSetup({ side: "long", entry: 4160.0, confidence: 70 }, plan, mode, ["htf_bias", "bms"]).reason, "off_plan_weak");
+});
+
+test("sanitizePlan drops an opposite-side POI that overlaps or nearly touches an earlier one", () => {
+  const p = sanitizePlan({ bias: "bearish", bias_reason: "", pois: [
+    { side: "short", zone_low: 4154.12, zone_high: 4158.93, level_type: "1h OB", setups: [], trigger: "x" },
+    { side: "long", zone_low: 4148.46, zone_high: 4152.69, level_type: "SSL", setups: [], trigger: "x" },
+    { side: "short", zone_low: 4165.1, zone_high: 4171.2, level_type: "PDH", setups: [], trigger: "x" },
+    { side: "long", zone_low: 4130.3, zone_high: 4137.9, level_type: "1h OB", setups: [], trigger: "x" },
+  ] }, { price: 4152, reach: 400 });
+  assert.deepEqual(p.pois.map((x) => `${x.side}@${x.zone_low}`), ["short@4154.12", "short@4165.1", "long@4130.3"]);
+});
