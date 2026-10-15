@@ -20,6 +20,7 @@ import {
   validateConfidence,
   validateRsi,
   validateTpDistance,
+  validateTriggerComplete,
 } from "./setup-gates.js";
 import * as market from "./market.js";
 
@@ -45,7 +46,7 @@ async function proposeSetup(args) {
   const smcCheck = validateSMCSetup(args, ctx);
   const trackRecord = checkTrackRecord({ setup_type: args.setup_type, session: getCurrentSession(), mode: mode.id });
   const blackout = checkNewsBlackout(await getCalendarEvents());
-  for (const check of [blackout, validateConfidence(args, mode), validateRsi(args, rsi), smcCheck, trackRecord]) {
+  for (const check of [blackout, validateConfidence(args, mode), validateRsi(args, rsi), smcCheck, validateTriggerComplete(args, ctx), trackRecord]) {
     if (!check.ok) return blocked(check, args);
   }
 

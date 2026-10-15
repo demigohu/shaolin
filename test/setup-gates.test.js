@@ -84,3 +84,25 @@ test("TP beyond the mode's reach is rejected", async () => {
   assert.equal(far.reason, "tp_too_far");
   assert.equal(validateTpDistance({ entry: 4167.36, tp_levels: [{ price: 4160 }, { price: 4155 }] }, m).ok, true);
 });
+
+test("trigger gate: BMS setups need a fresh BMS in the trade direction", async () => {
+  const { validateTriggerComplete } = await import("../tools/setup-gates.js");
+  const ctx = (bms, extra = {}) => ({ profile: { trigger_tf: "5m" }, trigger: { bms, rto: "not yet", sweeps: [], ...extra } });
+  const bull = { dir: "bullish", level: 4160, bars_ago: 1 };
+  const bear = { dir: "bearish", level: 4160, bars_ago: 1 };
+  assert.equal(validateTriggerComplete({ side: "short", setup_type: "sh_bms_rto" }, ctx(bull)).reason, "trigger_incomplete");
+  assert.equal(validateTriggerComplete({ side: "short", setup_type: "sh_bms_rto" }, ctx(null)).reason, "trigger_incomplete");
+  assert.equal(validateTriggerComplete({ side: "short", setup_type: "sh_bms_rto" }, ctx(bear)).ok, true);
+  assert.equal(validateTriggerComplete({ side: "short", setup_type: "sh_bms_rto" }, ctx({ ...bear, bars_ago: 40 })).reason, "trigger_stale");
+  assert.equal(validateTriggerComplete({ side: "short", setup_type: "sh_bms_rto" }, ctx(bear, { rto: "failed (closed through the OB)" })).reason, "trigger_failed");
+  assert.equal(validateTriggerComplete({ side: "long", setup_type: "sh_bms_rto" }, ctx(bull)).ok, true);
+});
+
+test("trigger gate: turtle soup needs the opposite pool swept", async () => {
+  const { validateTriggerComplete } = await import("../tools/setup-gates.js");
+  const ctx = (sweeps) => ({ profile: { trigger_tf: "5m" }, trigger: { bms: null, sweeps }, liquidity_events: [] });
+  assert.equal(validateTriggerComplete({ side: "short", setup_type: "turtle_soup_short" }, ctx([])).reason, "trigger_incomplete");
+  assert.equal(validateTriggerComplete({ side: "short", setup_type: "turtle_soup_short" }, ctx([{ side: "ssl" }])).reason, "trigger_incomplete");
+  assert.equal(validateTriggerComplete({ side: "short", setup_type: "turtle_soup_short" }, ctx([{ side: "bsl" }])).ok, true);
+  assert.equal(validateTriggerComplete({ side: "long", setup_type: "sh_bms_rto" }, null).ok, true);
+});

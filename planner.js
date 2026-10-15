@@ -105,7 +105,7 @@ Do the top-down analysis BEFORE the session, following "Market Structure and Pow
 - When BSL is taken the market tends to reverse down; when SSL is taken it tends to reverse up.
 - Daily range: Asian accumulates (range), London open manipulates (often makes HOD/LOD the wrong way), NY distributes / retraces.
 - Entries happen later on LTF at these levels via: ${SETUP_TYPES.join(", ")}.
-- The live agent confirms triggers (sweep, BMS, OB for the RTO) on the ${getStructureProfile(mode).trigger.tf} chart — write each POI's trigger in ${getStructureProfile(mode).trigger.tf} terms.
+- The live agent confirms triggers (sweep, BMS, OB for the RTO) on the ${getStructureProfile(mode).trigger.tf} chart — write each POI's trigger in ${getStructureProfile(mode).trigger.tf} terms. Never make a higher-TF candle close (15m/1h) part of the trigger.
 
 Produce up to ${MAX_POIS} POIs (points of interest) for today:
 - Each POI is a ZONE at a real key level from the data, within ${reach} pips of the current price, width ≤ ${Math.round(reach / 4)} pips.

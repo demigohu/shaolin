@@ -59,6 +59,47 @@ export function validateRsi(args, rsi) {
   return { ok: true };
 }
 
+const BMS_SETUPS = new Set(["sh_bms_rto", "sms_bms_rto", "bms_rto_ote", "amd_distribution"]);
+
+/**
+ * The PDF trigger must be printed on the entry TF before an entry — checked on the
+ * candles, not taken from the model's reading: BMS setups need a fresh BMS in the
+ * trade direction whose OB has not failed; turtle soup needs the opposite pool swept.
+ */
+export function validateTriggerComplete(args, ctx) {
+  if (config.screening?.requireTriggerComplete === false) return { ok: true };
+  const t = ctx?.trigger;
+  if (!t) return { ok: true };
+  const tf = ctx.profile?.trigger_tf ?? "entry TF";
+  const long = args.side === "long";
+
+  if (BMS_SETUPS.has(args.setup_type)) {
+    const want = long ? "bullish" : "bearish";
+    const maxBars = config.screening?.maxBmsBarsAgo ?? 24;
+    const bms = t.bms;
+    if (!bms || bms.dir !== want) {
+      const last = bms ? `last ${tf} BMS is ${bms.dir} (${bms.level.toFixed(2)}, ${bms.bars_ago} bars ago)` : `no ${tf} BMS`;
+      return { ok: false, reason: "trigger_incomplete", message: `${args.setup_type} ${args.side} needs a ${want} ${tf} BMS — ${last}. Trigger not complete → WATCH.` };
+    }
+    if (bms.bars_ago > maxBars) {
+      return { ok: false, reason: "trigger_stale", message: `${want} ${tf} BMS is ${bms.bars_ago} bars old (max ${maxBars}) — wait for a fresh one → WATCH.` };
+    }
+    if (String(t.rto || "").startsWith("failed")) {
+      return { ok: false, reason: "trigger_failed", message: `Price closed back through the ${tf} BMS order block — the trigger failed → WATCH.` };
+    }
+    return { ok: true };
+  }
+
+  if (args.setup_type === "turtle_soup_long" || args.setup_type === "turtle_soup_short") {
+    const side = long ? "ssl" : "bsl";
+    const swept = (t.sweeps || []).some((s) => s.side === side) || sideOfLiquidity(ctx.liquidity_events)[side];
+    if (!swept) {
+      return { ok: false, reason: "trigger_incomplete", message: `${args.setup_type} needs a ${side.toUpperCase()} sweep that closed back inside — none on ${tf} → WATCH.` };
+    }
+  }
+  return { ok: true };
+}
+
 export function validateProposedSl(args, ctx, mode) {
   const entry = Number(args.entry);
   const sl = Number(args.sl);
