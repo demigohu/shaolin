@@ -32,3 +32,19 @@ test("poolsFromContext collects Asian (only once complete), PD, PW and equal lev
   });
   assert.deepEqual(pools.map((p) => p.name), ["PD", "PW", "EQH 15m"]);
 });
+
+test("detectBmsTriggers: fresh BMS in the POI direction after price reached the zone", async () => {
+  const { detectBmsTriggers } = await import("../watcher.js");
+  const pois = [
+    { id: "P1", side: "long", zone_low: 4148.5, zone_high: 4152.7 },
+    { id: "P2", side: "short", zone_low: 4165, zone_high: 4171 },
+  ];
+  const tape = [{ h: 4153, l: 4148.0 }, { h: 4156, l: 4151 }];
+  const state = { bms: { dir: "bullish", level: 4154.9, bars_ago: 1 }, ob: { low: 4152.3, high: 4154.6 }, rto: "not yet", tape };
+  const t = detectBmsTriggers({ state, pois });
+  assert.deepEqual(t.map((x) => x.key), ["bms:P1:4154.90"]);
+  assert.match(t[0].text, /RTO zone \(OB\) 4152.30–4154.60/);
+  assert.equal(detectBmsTriggers({ state: { ...state, bms: { ...state.bms, bars_ago: 5 } }, pois }).length, 0, "stale BMS");
+  assert.equal(detectBmsTriggers({ state: { ...state, tape: [{ h: 4160, l: 4156 }] }, pois }).length, 0, "zone never reached");
+  assert.equal(detectBmsTriggers({ state, pois, lastFired: new Map([["bms:P1:4154.90", Date.now()]]) }).length, 0, "cooldown");
+});

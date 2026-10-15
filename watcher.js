@@ -55,3 +55,36 @@ export function poolsFromContext(ctx) {
   }
   return pools;
 }
+
+/**
+ * Trigger completion after a POI touch: a fresh entry-TF BMS in the POI's direction
+ * (bullish for long POIs, bearish for short) while price reached the zone in the
+ * recent bars. This is the PDF "SH/SMS → BMS" step — the OB that caused the BMS is
+ * where the RTO limit goes.
+ *
+ * @param state  ltfTriggerState() result
+ * @param maxBarsAgo how fresh the BMS must be
+ */
+export function detectBmsTriggers({ state, pois = [], lastFired = new Map(), cooldownMs = 60 * 60_000, now = Date.now(), maxBarsAgo = 2 }) {
+  const bms = state?.bms;
+  if (!bms || bms.bars_ago > maxBarsAgo) return [];
+  const recent = state.tape || [];
+  const out = [];
+  for (const p of pois) {
+    const wantDir = p.side === "long" ? "bullish" : "bearish";
+    if (bms.dir !== wantDir) continue;
+    const reached = p.side === "long"
+      ? recent.some((k) => k.l <= p.zone_high)
+      : recent.some((k) => k.h >= p.zone_low);
+    if (!reached) continue;
+    const key = `bms:${p.id}:${bms.level.toFixed(2)}`;
+    if (now - (lastFired.get(key) ?? 0) < cooldownMs) continue;
+    const ob = state.ob ? ` — RTO zone (OB) ${state.ob.low.toFixed(2)}–${state.ob.high.toFixed(2)}, RTO ${state.rto}` : "";
+    out.push({
+      key,
+      kind: "bms",
+      text: `plan ${p.id} ${p.side.toUpperCase()}: price reached the zone and a ${bms.dir} BMS closed through ${bms.level.toFixed(2)} (${bms.bars_ago} bars ago)${ob}`,
+    });
+  }
+  return out;
+}

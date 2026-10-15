@@ -58,21 +58,30 @@ ${getSetupsSummary()}
 HOW TO DECIDE (every cycle):
 1. Where is price relative to today's plan POIs and the HTF key levels (OB, liquidity pools)?
    Not at a key level → WATCH (say which level you are waiting for).
-2. At a key level: has the LTF trigger completed?
-   - turtle_soup_long/short: pool swept (wick through SSL/BSL) and price back inside.
-   - sh_bms_rto: sweep → LTF BMS confirming it → price returning to the OB that caused the BMS.
-   - sms_bms_rto: failure swing → BMS → RTO.
-   - bms_rto_ote: BMS in the HTF direction → retrace into 50%/OTE or the OB.
-   - amd_distribution: Asian range → London/NY false move → back the other way on RTO.
-   Trigger not complete → WATCH (say what is missing). Never enter on a touch alone.
-3. Confirm with get_xauusd_mtf + get_xauusd_combined (momentum/RSI). Need ≥2 confluence.
+2. At a key level: is the trigger COMPLETE? Judge it ONLY from the TRIGGER DATA block (its swings, sweeps,
+   BMS and OB) — never invent a new level to wait for. Definitions (from the PDF), mirror for shorts:
+   - turtle_soup_long: a pool was swept (wick below SSL) AND a bar closed back above it → COMPLETE.
+     Entry: market now, or limit at the reclaim; SL beyond the sweep wick.
+   - sh_bms_rto: sweep AND a BMS in the reversal direction (shown as "BMS" in the block) → COMPLETE.
+     Entry: LIMIT at the OB that caused the BMS (shown in the block) — do NOT wait for price to touch it;
+     the limit is the RTO. SL beyond the OB / sweep extreme. TP1 = the BMS swing / opposite liquidity.
+   - sms_bms_rto: failure swing (lower high / higher low) AND BMS → COMPLETE → same limit-at-OB entry.
+   - bms_rto_ote: BMS in the HTF direction → COMPLETE → limit at the OB or 50–72% of the BMS leg.
+   - amd_distribution: Asian range, London/NY false move beyond it, then BMS back → COMPLETE → limit at the OB.
+   Do NOT stack extra confirmations the definition doesn't list: no rejection candle after the RTO, no 15m
+   close when the 5m BMS is printed, no waiting for a newer swing. Trigger incomplete → WATCH naming the ONE
+   missing step. Never enter on a touch alone.
+3. Momentum: turtle soup / SH-SMS+BMS+RTO / AMD form AGAINST short-term momentum by definition — 5m/15m
+   momentum or "MTF bullish" against your side is NOT a reason to WATCH. Use 1h/4h bias as confluence;
+   RSI only matters for bms_rto_ote. Call get_xauusd_mtf + get_xauusd_combined for context. Need ≥2 confluence.
 4. SETUP → propose_setup. If rejected, the response says why — fix that one thing (never by tightening SL) and retry, or WATCH.
 5. Your final message's FIRST LINE is exactly one word: SETUP, WATCH or AVOID (no header, no markdown).
    SECOND LINE: one plain sentence (≤ 200 chars) — for WATCH: which trigger step is missing and the exact level/close you wait for. Details may follow. Price null or candle history unavailable → WATCH.
 
 ENTRY:
-- market: on the trigger candle / RTO now (entry within a few pips of live price).
-- limit: resting in the OB / OTE on the retrace side (long limit at/below price, short at/above).
+- limit (default after a BMS): resting in the OB / OTE on the retrace side (long limit at/below price, short at/above),
+  within ${mode.maxLimitEntryPips ?? "?"} pips of price. Management fills it when price trades back in.
+- market: only when price is already inside the OB/OTE right now (within a few pips of live price).
 
 SL / TP — structure-first:
 - SL beyond the sweep extreme / OB that invalidates the setup.

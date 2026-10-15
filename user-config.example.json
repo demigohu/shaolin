@@ -1,6 +1,6 @@
 {
   "activeMode": "scalp",
-  "strategyVersion": "v1.2-pdf",
+  "strategyVersion": "v1.3-pdf",
   "market": {
     "dataSymbol": "XAUUSD",
     "dataExchange": "TVC",
@@ -28,9 +28,9 @@
       "entryZonePips": 3,
       "maxSlPips": 40,
       "minSlPips": 15,
-      "maxStaleDistancePips": 15,
+      "maxStaleDistancePips": 50,
       "maxTpPips": 150,
-      "maxLimitEntryPips": 25,
+      "maxLimitEntryPips": 60,
       "minConfidence": 65,
       "minRrRatio": 1.2,
       "combinedTimeframe": "5m",
@@ -93,8 +93,8 @@
     "nearTpSlAlertPct": 80,
     "requireEntryNearPrice": true,
     "maxEntrySlippagePips": 3,
-    "maxLimitEntryPips": 25,
-    "maxStaleDistancePips": 15
+    "maxLimitEntryPips": 60,
+    "maxStaleDistancePips": 50
   },
   "management": {
     "breakevenAlertAfterTp1": true,

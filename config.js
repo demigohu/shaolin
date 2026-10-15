@@ -48,8 +48,8 @@ const defaultModes = {
     entryZonePips: 3,
     maxSlPips: 40,
     minSlPips: 15,
-    maxStaleDistancePips: 15,
-    maxLimitEntryPips: 25,
+    maxStaleDistancePips: 50,
+    maxLimitEntryPips: 60,
     maxTpPips: 150,
     minConfidence: 65,
     minRrRatio: 1.2,
@@ -107,7 +107,7 @@ const m = u.management || {};
 export const config = {
   activeMode: u.activeMode ?? "scalp",
   // Bump when the rules change; stats and the performance gate only count the current version.
-  strategyVersion: u.strategyVersion ?? "v1.2-pdf",
+  strategyVersion: u.strategyVersion ?? "v1.3-pdf",
   market: {
     dataSymbol: u.dataSymbol ?? u.market?.dataSymbol ?? "XAUUSD",
     dataExchange: u.dataExchange ?? u.market?.dataExchange ?? "TVC",

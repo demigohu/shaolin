@@ -25,14 +25,16 @@ import { sendMessage, startPolling, isEnabled as telegramEnabled, getTelegramSta
 import { closeMcp } from "./tools/mcp-client.js";
 import { getManagementPrice, fetchAnalysis, extractPriceFromAnalysis, isTradingViewBackingOff } from "./tools/market.js";
 import { getActivePlan, createPlan, checkPlanInvalidation, formatPlanForPrompt, formatPlanMessage } from "./planner.js";
-import { detectTriggers, poolsFromContext } from "./watcher.js";
+import { detectTriggers, detectBmsTriggers, poolsFromContext } from "./watcher.js";
+import { getEntryCandles } from "./tools/candles.js";
+import { ltfTriggerState } from "./smc-analysis.js";
 import { formatAgentStatus } from "./status.js";
 import { formatPerformanceStats } from "./performance-stats.js";
 import { getSetupMemorySummary } from "./setup-memory.js";
 import { clearStagedSignals } from "./signal-tracker.js";
 import { cleanContent, parseVerdict, verdictReason } from "./verdict.js";
 import { getCalendarEvents, checkNewsBlackout, formatCalendarForPrompt, upcomingEvents, formatEvent } from "./tools/calendar.js";
-import { buildSMCContext, formatSMCForPrompt, getLastSMCContext } from "./smc.js";
+import { buildSMCContext, formatSMCForPrompt, getLastSMCContext, getStructureProfile, withLiveBar } from "./smc.js";
 
 let _screeningBusy = false;
 let _managementBusy = false;
@@ -45,6 +47,10 @@ let _planningBusy = false;
 let _lastPlanAt = 0;
 let _lastScreeningAt = 0;
 const _firedTriggers = new Map();
+let _armedUntil = 0;
+let _lastBmsCheck = 0;
+const BMS_CHECK_MS = 2 * 60_000;
+const ARMED_MS = 45 * 60_000;
 
 export function syncFastManagementTimer() {
   const open = getOpenSetups();
@@ -385,23 +391,47 @@ async function runWatcher() {
   await handlePlanInvalidation(price);
 
   const ctx = getLastSMCContext();
+  const pois = getActivePlan()?.pois || [];
   const triggers = detectTriggers({
     price,
     bar: { high: Number(m5?.price_data?.high), low: Number(m5?.price_data?.low) },
-    pois: getActivePlan()?.pois || [],
+    pois,
     pools: poolsFromContext(ctx),
     proximityPips: mode.entryZonePips ?? 5,
     lastFired: _firedTriggers,
     cooldownMs: (config.watcher?.cooldownMin ?? 30) * 60_000,
   });
+  if (triggers.length) _armedUntil = Date.now() + ARMED_MS;
+
+  // Completion check: after a POI touch/sweep, watch the entry TF for the BMS that
+  // completes the setup (often a few bars later, after price has left the zone).
+  const pip = config.broker.pipSize || 0.1;
+  const nearPoi = pois.some((p) => price >= p.zone_low - 30 * pip && price <= p.zone_high + 30 * pip);
+  if (pois.length && (nearPoi || Date.now() < _armedUntil) && Date.now() - _lastBmsCheck >= BMS_CHECK_MS) {
+    _lastBmsCheck = Date.now();
+    const profile = getStructureProfile(mode);
+    const entry = await getEntryCandles(price, profile.trigger.key);
+    if (entry?.length) {
+      const pools = [
+        ...poolsFromContext(ctx),
+        ...pois.map((p) => (p.side === "long" ? { name: p.id, low: p.zone_low } : { name: p.id, high: p.zone_high })),
+      ];
+      // The watcher only holds TradingView's 5m bar; other trigger TFs go without a live bar.
+      const live = profile.trigger.tf === "5m" ? m5 : null;
+      const state = ltfTriggerState(withLiveBar(entry, live, profile.trigger.tf, Date.now()), pools);
+      triggers.push(...detectBmsTriggers({ state, pois, lastFired: _firedTriggers }));
+    }
+  }
   if (!triggers.length) return;
 
   for (const t of triggers) _firedTriggers.set(t.key, Date.now());
   const text = triggers.map((t) => t.text).join("; ");
   log("watcher", `Trigger: ${text}`);
-  const announce = config.watcher?.notifyPoiTouch !== false && triggers.some((t) => t.kind === "poi");
+  const announce = config.watcher?.notifyPoiTouch !== false && triggers.some((t) => t.kind === "poi" || t.kind === "bms");
   if (announce) {
-    await sendMessage(`📍 ${triggers.filter((t) => t.kind === "poi").map((t) => t.text).join("\n")}\nScreening for a trigger now…`);
+    const lines = triggers.filter((t) => t.kind === "poi" || t.kind === "bms")
+      .map((t) => `${t.kind === "bms" ? "⚡" : "📍"} ${t.text}`);
+    await sendMessage(`${lines.join("\n")}\nScreening for a trigger now…`);
   }
   const startedAt = Date.now();
   const result = await runScreeningCycle({ trigger: text });

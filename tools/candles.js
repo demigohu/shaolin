@@ -236,6 +236,27 @@ async function twelveDataCandleSet(spotPrice) {
 }
 
 /**
+ * Entry-timeframe candles only (watcher BMS checks): one Twelve Data request,
+ * or the cached Yahoo set as fallback. `key` = m5 | m15 | h1.
+ */
+export async function getEntryCandles(spotPrice, key = "m5") {
+  if (spotPrice == null) return null;
+  if (process.env.TWELVEDATA_API_KEY) {
+    try {
+      const raw = await fetchTwelveData(key === "h1" ? "1h" : "5min");
+      let basis = raw.length ? raw.at(-1).c - spotPrice : 0;
+      if (Math.abs(basis) > MAX_SPOT_GAP) basis = 0;
+      const spot = shiftCandles(raw, basis);
+      return key === "m15" ? aggregateCandles(spot, M15_MS) : spot;
+    } catch (error) {
+      log("candles_warn", `Twelve Data entry candles failed (${error.message}) — falling back to Yahoo`);
+    }
+  }
+  const set = await yahooCandleSet(spotPrice, []).catch(() => null);
+  return set?.[key] ?? null;
+}
+
+/**
  * Candle history on the spot feed: Twelve Data (real time) when TWELVEDATA_API_KEY
  * is set, otherwise — or if it fails (credits, outage) — Yahoo GC=F shifted by the
  * futures→spot basis. Returns null when spot price is unknown.

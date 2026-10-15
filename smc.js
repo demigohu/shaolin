@@ -387,7 +387,7 @@ function formatTrigger(ctx) {
     ? `Last ${t.tape.length} ${tf} bars (WIB open, O/H/L/C), oldest → newest — the final bar is LIVE and still forming:`
     : `Last ${t.tape.length} ${tf} bars (WIB open, O/H/L/C), oldest → newest — history is ~10 min delayed, the final bar is LIVE from TradingView (a gap before it means bars not yet published):`);
   for (const k of t.tape) out.push(`  ${wibClock(k.t)} ${fmt(k.o)} ${fmt(k.h)} ${fmt(k.l)} ${fmt(k.c)}${k.live ? "  ← live, still forming" : ""}`);
-  out.push(`A trigger is COMPLETE when these lines show it (e.g. sweep → ${tf} BMS → price back in the OB). Do not demand a confirmation that is already printed above.`);
+  out.push(`Sweep + ${tf} BMS in the reversal direction shown above = trigger COMPLETE → limit at the OB listed. Do not demand a confirmation that is already printed above, and do not wait for a different level.`);
   return out;
 }
 
