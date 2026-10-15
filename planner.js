@@ -13,7 +13,7 @@ import { repoPath } from "./repo-root.js";
 import { config } from "./config.js";
 import { log } from "./logger.js";
 import { getActiveMode } from "./modes.js";
-import { buildSMCContext, formatSMCForPrompt, SETUP_TYPES } from "./smc.js";
+import { buildSMCContext, formatSMCForPrompt, SETUP_TYPES, getStructureProfile } from "./smc.js";
 import { getCalendarEvents, formatCalendarForPrompt } from "./tools/calendar.js";
 import { getClient } from "./agent.js";
 import { toPips } from "./tools/price.js";
@@ -105,6 +105,7 @@ Do the top-down analysis BEFORE the session, following "Market Structure and Pow
 - When BSL is taken the market tends to reverse down; when SSL is taken it tends to reverse up.
 - Daily range: Asian accumulates (range), London open manipulates (often makes HOD/LOD the wrong way), NY distributes / retraces.
 - Entries happen later on LTF at these levels via: ${SETUP_TYPES.join(", ")}.
+- The live agent confirms triggers (sweep, BMS, OB for the RTO) on the ${getStructureProfile(mode).trigger.tf} chart — write each POI's trigger in ${getStructureProfile(mode).trigger.tf} terms.
 
 Produce up to ${MAX_POIS} POIs (points of interest) for today:
 - Each POI is a ZONE at a real key level from the data, within ${reach} pips of the current price, width ≤ ${Math.round(reach / 4)} pips.

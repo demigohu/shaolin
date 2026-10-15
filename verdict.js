@@ -16,9 +16,11 @@ export function cleanContent(content) {
 /** Second line = the one-sentence reason the prompt asks for (what is missing / awaited). */
 export function verdictReason(content, max = 220) {
   const lines = String(content || "").split("\n").map((l) => l.replace(/[*_#>`|]/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
-  const first = lines[0] || "";
-  const rest = /^(SETUP|WATCH|AVOID)\b/.test(first) ? first.replace(/^(SETUP|WATCH|AVOID)\b[\s:—-]*/, "") || lines[1] || "" : first;
-  return rest.slice(0, max);
+  // The reason follows the verdict line — skip any preamble the model wrote before it.
+  const at = lines.findIndex((l) => /^(SETUP|WATCH|AVOID)\b/.test(l));
+  if (at === -1) return (lines[0] || "").slice(0, max);
+  const inline = lines[at].replace(/^(SETUP|WATCH|AVOID)\b[\s:—-]*/, "");
+  return (inline || lines[at + 1] || "").slice(0, max);
 }
 
 export function parseVerdict(content) {
