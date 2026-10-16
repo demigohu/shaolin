@@ -106,6 +106,7 @@ Do the top-down analysis BEFORE the session, following "Market Structure and Pow
 - Daily range: Asian accumulates (range), London open manipulates (often makes HOD/LOD the wrong way), NY distributes / retraces.
 - Entries happen later on LTF at these levels via: ${SETUP_TYPES.join(", ")}.
 - The live agent confirms triggers (sweep, BMS, OB for the RTO) on the ${getStructureProfile(mode).trigger.tf} chart — write each POI's trigger in ${getStructureProfile(mode).trigger.tf} terms. Never make a higher-TF candle close (15m/1h) part of the trigger.
+- Write triggers with the PDF definitions only: turtle soup = sweep of the pool + a bar closing back inside; SH/SMS+BMS+RTO = sweep/failure swing + BMS, then a LIMIT at the OB that caused the BMS. No engulfing / rejection-candle / extra-close requirements.
 
 Produce up to ${MAX_POIS} POIs (points of interest) for today:
 - Each POI is a ZONE at a real key level from the data, within ${reach} pips of the current price, width ≤ ${Math.round(reach / 4)} pips.
@@ -122,15 +123,17 @@ export function sanitizePlan(raw, { price, reach }) {
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
   const minGap = (reach / 8) * (config.broker.pipSize || 0.1);
   const pois = [];
+  const dropped = [];
   for (const p of Array.isArray(raw?.pois) ? raw.pois : []) {
     let lo = num(p.zone_low);
     let hi = num(p.zone_high);
-    if (lo == null || hi == null || !["long", "short"].includes(p.side)) continue;
+    const drop = (why) => dropped.push(`${p.side ?? "?"} ${p.zone_low}–${p.zone_high}: ${why}`);
+    if (lo == null || hi == null || !["long", "short"].includes(p.side)) { drop("missing side/zone"); continue; }
     if (lo > hi) [lo, hi] = [hi, lo];
-    if (toPips(hi - lo) > reach / 4) continue;
-    if (price != null && Math.min(Math.abs(toPips(lo - price)), Math.abs(toPips(hi - price))) > reach) continue;
+    if (toPips(hi - lo) > reach / 4) { drop(`zone ${toPips(hi - lo)}p wide > ${Math.round(reach / 4)}p`); continue; }
+    if (price != null && Math.min(Math.abs(toPips(lo - price)), Math.abs(toPips(hi - price))) > reach) { drop(`more than ${reach}p from price ${price}`); continue; }
     // Opposite-side zones that overlap (or nearly) make every trigger ambiguous — keep the earlier, higher-priority one.
-    if (pois.some((q) => q.side !== p.side && lo <= q.zone_high + minGap && hi >= q.zone_low - minGap)) continue;
+    if (pois.some((q) => q.side !== p.side && lo <= q.zone_high + minGap && hi >= q.zone_low - minGap)) { drop("overlaps an opposite-side POI"); continue; }
     pois.push({
       id: `P${pois.length + 1}`,
       side: p.side,
@@ -149,6 +152,7 @@ export function sanitizePlan(raw, { price, reach }) {
     bias_reason: String(raw?.bias_reason || "").slice(0, 400),
     invalidation: { above: num(raw?.invalidation_above), below: num(raw?.invalidation_below) },
     pois,
+    dropped,
     session_notes: raw?.session_notes ? String(raw.session_notes).slice(0, 800) : null,
   };
 }
@@ -171,30 +175,39 @@ export async function createPlan({ reason = "scheduled" } = {}) {
   const calendar = formatCalendarForPrompt(await getCalendarEvents());
   const model = config.llm.planningModel || config.llm.screeningModel;
 
-  let raw = null;
+  const messages = [
+    { role: "system", content: plannerPrompt(mode, reach) },
+    { role: "user", content: `${formatSMCForPrompt(ctx)}\n\n${calendar}\n\nBuild today's plan now.` },
+  ];
+  let clean = null;
   let lastError = null;
-  for (let attempt = 0; attempt < 2 && !raw; attempt++) {
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const response = await getClient().chat.completions.create({
         model,
-        messages: [
-          { role: "system", content: plannerPrompt(mode, reach) },
-          { role: "user", content: `${formatSMCForPrompt(ctx)}\n\n${calendar}\n\nBuild today's plan now.` },
-        ],
+        messages,
         tools: [SUBMIT_PLAN_TOOL],
         tool_choice: "required",
         temperature: config.llm.temperature,
         max_tokens: config.llm.maxTokens,
       });
-      raw = parseToolArgs(response.choices?.[0]?.message);
+      const raw = parseToolArgs(response.choices?.[0]?.message);
+      clean = sanitizePlan(raw, { price: ctx.price, reach });
+      if (clean.dropped.length) log("plan_warn", `Dropped POIs: ${clean.dropped.join(" | ")}`);
+      if (clean.pois.length) break;
+      // An empty plan leaves the watcher blind all session — ask once more, saying why.
+      log("plan_warn", `Planner attempt ${attempt + 1} gave no usable POIs (returned ${raw?.pois?.length ?? 0})`);
+      messages.push({
+        role: "user",
+        content: `Your plan has no usable POIs${clean.dropped.length ? ` — rejected: ${clean.dropped.join("; ")}` : ""}. Every POI must be ≤${Math.round(reach / 4)}p wide and within ${reach}p of price ${ctx.price}. Give at least 2 POIs from the levels in the data and call submit_plan again.`,
+      });
     } catch (error) {
       lastError = error;
       log("plan_warn", `Planner attempt ${attempt + 1} failed: ${error.message}`);
     }
   }
-  if (!raw) throw new Error(`planner failed: ${lastError?.message || "no plan returned"}`);
-
-  const clean = sanitizePlan(raw, { price: ctx.price, reach });
+  if (!clean) throw new Error(`planner failed: ${lastError?.message || "no plan returned"}`);
+  delete clean.dropped;
   const now = Date.now();
   const dayEnd = tradingDayStart(now, tzOffsetHours("America/New_York", new Date(now))) + 24 * 3_600_000;
   const plan = {
