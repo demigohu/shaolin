@@ -55,3 +55,12 @@ test("sanitizePlan drops an opposite-side POI that overlaps or nearly touches an
   ] }, { price: 4152, reach: 400 });
   assert.deepEqual(p.pois.map((x) => `${x.side}@${x.zone_low}`), ["short@4154.12", "short@4165.1", "long@4130.3"]);
 });
+
+test("sanitizePlan takes the side from the targets when the label contradicts them", () => {
+  const p = sanitizePlan({ bias: "bearish", bias_reason: "", pois: [
+    { side: "short", zone_low: 4156.23, zone_high: 4162.6, level_type: "EQL SSL", setups: [], trigger: "sweep then close back above → long", targets: [4162.6, 4166.24, 4171.31] },
+    { side: "short", zone_low: 4180, zone_high: 4183, level_type: "OB", setups: [], trigger: "x", targets: [4172, 4168] },
+  ] }, { price: 4168, reach: 400 });
+  assert.equal(p.pois[0].side, "long");
+  assert.equal(p.pois[1].side, "short");
+});

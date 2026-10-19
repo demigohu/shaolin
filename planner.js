@@ -130,13 +130,18 @@ export function sanitizePlan(raw, { price, reach }) {
     const drop = (why) => dropped.push(`${p.side ?? "?"} ${p.zone_low}–${p.zone_high}: ${why}`);
     if (lo == null || hi == null || !["long", "short"].includes(p.side)) { drop("missing side/zone"); continue; }
     if (lo > hi) [lo, hi] = [hi, lo];
+    // Targets decide the side: a "short" POI whose targets all sit above it is a long (the model mislabels).
+    const tgts = (Array.isArray(p.targets) ? p.targets : []).map(num).filter((t) => t != null);
+    const implied = tgts.length && tgts.every((t) => t >= hi) ? "long" : tgts.length && tgts.every((t) => t <= lo) ? "short" : null;
+    const side = implied ?? p.side;
+    if (side !== p.side) log("plan_warn", `POI ${lo}–${hi} labelled ${p.side} but targets are ${implied === "long" ? "above" : "below"} — using ${side}`);
     if (toPips(hi - lo) > reach / 4) { drop(`zone ${toPips(hi - lo)}p wide > ${Math.round(reach / 4)}p`); continue; }
     if (price != null && Math.min(Math.abs(toPips(lo - price)), Math.abs(toPips(hi - price))) > reach) { drop(`more than ${reach}p from price ${price}`); continue; }
     // Opposite-side zones that overlap (or nearly) make every trigger ambiguous — keep the earlier, higher-priority one.
-    if (pois.some((q) => q.side !== p.side && lo <= q.zone_high + minGap && hi >= q.zone_low - minGap)) { drop("overlaps an opposite-side POI"); continue; }
+    if (pois.some((q) => q.side !== side && lo <= q.zone_high + minGap && hi >= q.zone_low - minGap)) { drop("overlaps an opposite-side POI"); continue; }
     pois.push({
       id: `P${pois.length + 1}`,
-      side: p.side,
+      side,
       zone_low: lo,
       zone_high: hi,
       level_type: String(p.level_type || "").slice(0, 160),
