@@ -103,3 +103,38 @@ export function detectBmsTriggers({ state, pois = [], price = null, lastFired = 
   }
   return out;
 }
+
+/**
+ * 1m entry timing after a completed trigger-TF BMS: price came back into the trigger
+ * OB (RTO touched) and a fresh refinement BMS printed the POI's way. Fires once per
+ * POI per cooldown; the screener then proposes at price or at the refinement OB.
+ *
+ * @param state   ltfTriggerState() on the trigger TF (5m, with live bar)
+ * @param refine  ltfTriggerState() on the refinement TF (1m)
+ */
+export function detectRefineTriggers({ state, refine, pois = [], price = null, lastFired = new Map(), cooldownMs = 30 * 60_000, now = Date.now(), maxBmsBarsAgo = 24, maxBarsAgo = 2, tolerancePips = 30, tf = "5m", rtf = "1m" }) {
+  const bms = state?.bms;
+  const rb = refine?.bms;
+  if (!bms || !rb || bms.bars_ago > maxBmsBarsAgo || state.rto !== "touched" || rb.bars_ago > maxBarsAgo || rb.dir !== bms.dir) return [];
+  const out = [];
+  for (const p of pois) {
+    if (bms.dir !== (p.side === "long" ? "bullish" : "bearish")) continue;
+    if (state.ob) {
+      const gap = p.side === "long" ? toPips(state.ob.low - p.zone_high) : toPips(p.zone_low - state.ob.high);
+      if (gap > tolerancePips) continue;
+    }
+    const key = `refine:${p.id}`;
+    if (now - (lastFired.get(key) ?? 0) < cooldownMs) continue;
+    const ob = state.ob ? `${state.ob.low.toFixed(2)}–${state.ob.high.toFixed(2)}` : "?";
+    const rob = refine.ob ? ` — ${rtf} OB ${refine.ob.low.toFixed(2)}–${refine.ob.high.toFixed(2)} (${priceVsZone(price, refine.ob)})` : "";
+    out.push({
+      key,
+      kind: "refine",
+      poi: p,
+      ob: refine.ob ?? state.ob,
+      trigger_ob: state.ob,
+      text: `plan ${p.id} ${p.side.toUpperCase()}: price came back into the ${tf} OB ${ob} and a ${rb.dir} ${rtf} BMS closed through ${rb.level.toFixed(2)} (${rb.bars_ago} bars ago)${rob}`,
+    });
+  }
+  return out;
+}

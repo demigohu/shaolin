@@ -87,7 +87,7 @@ export function validateTriggerComplete(args, ctx) {
     if (String(t.rto || "").startsWith("failed")) {
       return { ok: false, reason: "trigger_failed", message: `Price closed back through the ${tf} BMS order block — the trigger failed → WATCH.` };
     }
-    return { ok: true };
+    return validateRefinement(ctx, want);
   }
 
   if (args.setup_type === "turtle_soup_long" || args.setup_type === "turtle_soup_short") {
@@ -96,6 +96,27 @@ export function validateTriggerComplete(args, ctx) {
     if (!swept) {
       return { ok: false, reason: "trigger_incomplete", message: `${args.setup_type} needs a ${side.toUpperCase()} sweep that closed back inside — none on ${tf} → WATCH.` };
     }
+  }
+  return { ok: true };
+}
+
+/**
+ * Entry timing on the refinement TF (1m for scalp): price back in the trigger-TF OB,
+ * then a fresh refinement BMS the trade's way. Skipped when there is no 1m data.
+ */
+function validateRefinement(ctx, want) {
+  const r = ctx.refine;
+  if (!r) return { ok: true };
+  const tf = ctx.profile?.trigger_tf ?? "entry TF";
+  const rtf = ctx.profile?.refine_tf ?? "1m";
+  if (ctx.trigger.rto !== "touched") {
+    return { ok: false, reason: "refine_no_rto", message: `${tf} trigger complete but price has not come back into the ${tf} OB yet — wait for the RTO, then a ${want} ${rtf} BMS → WATCH.` };
+  }
+  const maxBars = config.screening?.maxRefineBarsAgo ?? 5;
+  const b = r.bms;
+  if (!b || b.dir !== want || b.bars_ago > maxBars) {
+    const last = b ? `last ${rtf} BMS is ${b.dir}, ${b.bars_ago} bars ago` : `no ${rtf} BMS`;
+    return { ok: false, reason: "refine_pending", message: `Price is in the ${tf} OB — entry needs a ${want} ${rtf} BMS ≤${maxBars} bars old (${last}) → WATCH.` };
   }
   return { ok: true };
 }

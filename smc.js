@@ -146,6 +146,7 @@ export const STRUCTURE_PROFILES = {
     tvTfs: ["5m", "15m", "1h", "4h"], htf: ["4h", "1h", "15m"], rsiTf: "15m",
     swing: { key: "h1", tf: "1h", lookback: 48 }, bos: { key: "m15", tf: "15m" }, ob: { key: "m15", tf: "15m" },
     wick: { key: "m5", tf: "5m" }, sweep: { key: "m15", bars: 8 }, trigger: { key: "m5", tf: "5m" },
+    refine: { key: "m1", tf: "1m" },
     zones: ["4h", "1h", "15m", "5m"], mergePips: 8, proximityPips: 5,
     pools: ["asian", "pd", "eq"], eq: [["m15", "15m"], ["h1", "1h"]], killzoneGate: true,
   },
@@ -248,6 +249,7 @@ export async function buildSMCContext({ profileId = null, reachPips = undefined,
   const swingTrend = tv[profile.swing.tf]?.market_structure?.trend;
   const fib = computeFibOte(swing, swingTrend || structure.bias, price);
   const trigger = candles ? ltfTriggerState(withLiveBar(candles[profile.trigger.key], tv[profile.trigger.tf], profile.trigger.tf, nowMs), pools) : null;
+  const refine = refineState(candles, profile, pools);
   const orderBlocks = candles
     ? { ...findOrderBlocks(candles[profile.ob.key]), wick_rejection: wickRejection(candles[profile.wick.key]) }
     : null;
@@ -261,6 +263,7 @@ export async function buildSMCContext({ profileId = null, reachPips = undefined,
       wick_tf: profile.wick.tf,
       rsi_tf: profile.rsiTf,
       trigger_tf: profile.trigger.tf,
+      refine_tf: refine ? profile.refine.tf : null,
       killzone_gate: profile.killzoneGate,
     },
     wib: wib.label,
@@ -295,6 +298,7 @@ export async function buildSMCContext({ profileId = null, reachPips = undefined,
     fib,
     order_blocks: orderBlocks,
     trigger,
+    refine,
     liquidity_events: liquidity.events,
     liquidity_hints: liquidity.hints,
     suggested_setups: suggestPlaybooks(liquidity.events, amdPhase, structure.ltf_bos),
@@ -318,7 +322,7 @@ export async function buildSMCContext({ profileId = null, reachPips = undefined,
     context.ltf.nearest_resistance = context.mtf_zones.nearestResistance?.price ?? null;
   }
 
-  log("smc", `Context [${mode.id}${profileId ? `/${profileId} view` : ""}] ${wib.label} ${amdPhase} price=${price} candles=${candles?.source ?? "none"} basis=${candles?.basis ?? "?"} events=${liquidity.events.join(",") || "none"}`);
+  log("smc", `Context [${mode.id}${profileId ? `/${profileId} view` : ""}] ${wib.label} ${amdPhase} price=${price} candles=${candles?.source ?? "none"}${candles?.m1 ? "+1m" : ""} basis=${candles?.basis ?? "?"} events=${liquidity.events.join(",") || "none"}`);
   if (store) _lastSMCContext = context;
   return context;
 }
@@ -365,6 +369,14 @@ export function withLiveBar(candles, tvAnalysis, tf, nowMs) {
   return [...closed.filter((k) => k.t < live.t), live];
 }
 
+/** Entry refinement TF (1m for scalp): the BMS inside the trigger-TF OB that times the entry. */
+export function refineState(candles, profile, pools = []) {
+  if (!profile.refine || config.screening?.entryRefine === false) return null;
+  const bars = candles?.[profile.refine.key];
+  if (!bars?.length) return null;
+  return ltfTriggerState(bars, pools, { lookback: 60, tapeBars: 10, sweepBars: 15 });
+}
+
 const wibClock = (ms) => new Date(ms + 7 * 3_600_000).toISOString().slice(11, 16);
 
 /** Entry-TF trigger block: lets the model verify sweep → BMS → RTO instead of guessing. */
@@ -387,7 +399,28 @@ function formatTrigger(ctx) {
     ? `Last ${t.tape.length} ${tf} bars (WIB open, O/H/L/C), oldest → newest — the final bar is LIVE and still forming:`
     : `Last ${t.tape.length} ${tf} bars (WIB open, O/H/L/C), oldest → newest — history is ~10 min delayed, the final bar is LIVE from TradingView (a gap before it means bars not yet published):`);
   for (const k of t.tape) out.push(`  ${wibClock(k.t)} ${fmt(k.o)} ${fmt(k.h)} ${fmt(k.l)} ${fmt(k.c)}${k.live ? "  ← live, still forming" : ""}`);
-  out.push(`Sweep + ${tf} BMS in the reversal direction shown above = trigger COMPLETE → limit at the OB listed. Do not demand a confirmation that is already printed above, and do not wait for a different level.`);
+  out.push(ctx.refine
+    ? `Sweep + ${tf} BMS in the reversal direction shown above = setup ARMED. Entry is timed on ${ctx.profile.refine_tf} (block below) — do not demand any other confirmation.`
+    : `Sweep + ${tf} BMS in the reversal direction shown above = trigger COMPLETE → limit at the OB listed. Do not demand a confirmation that is already printed above, and do not wait for a different level.`);
+  return out;
+}
+
+/** 1m entry block: after the 5m trigger, entry = price back in the 5m OB + a 1m BMS the trade's way. */
+function formatRefine(ctx) {
+  const r = ctx.refine;
+  const tf = ctx.profile.refine_tf;
+  const ttf = ctx.profile.trigger_tf;
+  const out = ["", `── ${tf} ENTRY REFINEMENT (real time; the last bar is still forming) ──`];
+  out.push(`${tf} swing highs: ${r.swing_highs.map((x) => `${fmt(x.price)} (${x.bars_ago} bars ago)`).join(", ") || "none"}`);
+  out.push(`${tf} swing lows:  ${r.swing_lows.map((x) => `${fmt(x.price)} (${x.bars_ago} bars ago)`).join(", ") || "none"}`);
+  if (r.bms) {
+    out.push(`${tf} BMS: ${r.bms.dir.toUpperCase()} — close ${fmt(r.bms.close)} through ${fmt(r.bms.level)}, ${r.bms.bars_ago} bars ago`);
+    if (r.ob) out.push(`${tf} OB that caused it: ${fmt(r.ob.low)}–${fmt(r.ob.high)} | RTO: ${r.rto}`);
+  } else {
+    out.push(`${tf} BMS: none in the window`);
+  }
+  out.push(`Last ${r.tape.length} ${tf} bars (WIB, O/H/L/C): ${r.tape.map((k) => `${wibClock(k.t)} ${fmt(k.o)}/${fmt(k.h)}/${fmt(k.l)}/${fmt(k.c)}`).join(" · ")}`);
+  out.push(`ENTRY RULE for sh_bms_rto / sms_bms_rto / bms_rto_ote / amd_distribution: (1) the ${ttf} trigger is complete, (2) price came back into the ${ttf} OB (RTO "touched"), (3) a ${tf} BMS the TRADE's way printed ≤5 bars ago → SETUP now: market at price, or limit at the ${tf} OB when price already left it. SL beyond the ${tf} swing that made the BMS or the sweep extreme, whichever is structural (min SL still applies). Missing (2) or (3) → WATCH naming it. propose_setup checks all three on the candles.`);
   return out;
 }
 
@@ -442,6 +475,7 @@ export function formatSMCForPrompt(ctx) {
   lines.push(`Trend ${Object.entries(ctx.htf).map(([tf, t]) => `${tf}: ${t}`).join(" | ")} | RSI ${ctx.ltf.rsi_tf} ${ctx.ltf.rsi ?? "?"}`);
 
   if (ctx.trigger) lines.push(...formatTrigger(ctx));
+  if (ctx.trigger && ctx.refine) lines.push(...formatRefine(ctx));
 
   if (ctx.liquidity_events.length) {
     lines.push(`Liquidity: ${ctx.liquidity_events.join(", ")} — include liquidity_sweep in confluence for turtle soup`);

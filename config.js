@@ -107,7 +107,7 @@ const m = u.management || {};
 export const config = {
   activeMode: u.activeMode ?? "scalp",
   // Bump when the rules change; stats and the performance gate only count the current version.
-  strategyVersion: u.strategyVersion ?? "v1.4-pdf",
+  strategyVersion: u.strategyVersion ?? "v1.5-pdf",
   market: {
     dataSymbol: u.dataSymbol ?? u.market?.dataSymbol ?? "XAUUSD",
     dataExchange: u.dataExchange ?? u.market?.dataExchange ?? "TVC",
@@ -141,6 +141,9 @@ export const config = {
     // Entry needs the entry-TF trigger on the candles (BMS in the trade direction / opposite sweep).
     requireTriggerComplete: s.requireTriggerComplete !== false,
     maxBmsBarsAgo: s.maxBmsBarsAgo ?? 24,
+    // Scalp entries are timed on 1m: RTO into the 5m OB, then a 1m BMS the trade's way.
+    entryRefine: s.entryRefine !== false,
+    maxRefineBarsAgo: s.maxRefineBarsAgo ?? 5,
     llmOwnsTpSl: s.llmOwnsTpSl !== false,
     enforceMinRr: s.enforceMinRr !== false,
     slStructureBufferPips: s.slStructureBufferPips ?? 3,

@@ -25,7 +25,7 @@ import { sendMessage, startPolling, isEnabled as telegramEnabled, getTelegramSta
 import { closeMcp } from "./tools/mcp-client.js";
 import { getManagementPrice, fetchAnalysis, extractPriceFromAnalysis, isTradingViewBackingOff } from "./tools/market.js";
 import { getActivePlan, createPlan, checkPlanInvalidation, formatPlanForPrompt, formatPlanMessage } from "./planner.js";
-import { detectTriggers, detectBmsTriggers, poolsFromContext } from "./watcher.js";
+import { detectTriggers, detectBmsTriggers, detectRefineTriggers, poolsFromContext } from "./watcher.js";
 import { getEntryCandles } from "./tools/candles.js";
 import { ltfTriggerState } from "./smc-analysis.js";
 import { formatAgentStatus } from "./status.js";
@@ -34,7 +34,7 @@ import { getSetupMemorySummary } from "./setup-memory.js";
 import { clearStagedSignals } from "./signal-tracker.js";
 import { cleanContent, parseVerdict, verdictReason } from "./verdict.js";
 import { getCalendarEvents, checkNewsBlackout, formatCalendarForPrompt, upcomingEvents, formatEvent } from "./tools/calendar.js";
-import { buildSMCContext, formatSMCForPrompt, getLastSMCContext, getStructureProfile, withLiveBar } from "./smc.js";
+import { buildSMCContext, formatSMCForPrompt, getLastSMCContext, getStructureProfile, withLiveBar, refineState } from "./smc.js";
 
 let _screeningBusy = false;
 let _managementBusy = false;
@@ -50,7 +50,10 @@ const _firedTriggers = new Map();
 let _armedUntil = 0;
 let _lastBmsCheck = 0;
 const BMS_CHECK_MS = 2 * 60_000;
+const REFINE_CHECK_MS = 55_000;
 const ARMED_MS = 45 * 60_000;
+const REFINE_MS = 45 * 60_000;
+let _refineUntil = 0;
 
 export function syncFastManagementTimer() {
   const open = getOpenSetups();
@@ -87,6 +90,7 @@ function extractLastSetupFromMessages(messages) {
 
 /** Task text for a completed plan trigger: propose the RTO limit unless something concrete invalidates it. */
 function completedTriggerTask(t, mode) {
+  if (t.kind === "refine") return refinedEntryTask(t, mode);
   const side = t.poi.side;
   const ob = t.ob ? `${t.ob.low.toFixed(2)}–${t.ob.high.toFixed(2)}` : "the OB in the trigger data";
   return [
@@ -95,6 +99,18 @@ function completedTriggerTask(t, mode) {
     `SL beyond the OB / sweep extreme (${mode.minSlPips ?? "?"}–${mode.maxSlPips ?? "?"}p), TP1 at the BMS swing / opposite liquidity (plan targets: ${t.poi.targets?.join(", ") || "see plan"}), setup_type sh_bms_rto, sms_bms_rto or turtle_soup to match, plan_poi in confluence.`,
     "The limit order does the waiting: 'price has not pulled back into the OB yet' is NOT a reason to WATCH.",
     "WATCH/AVOID only for a concrete invalidation: price already closed beyond the OB's far side or the SL level, RR below minimum within the TP limit, or a news blackout.",
+  ].join(" ");
+}
+
+/** Task text once the 1m entry fired: price is back in the 5m OB and a 1m BMS printed the trade's way. */
+function refinedEntryTask(t, mode) {
+  const side = t.poi.side;
+  const ob = t.ob ? `${t.ob.low.toFixed(2)}–${t.ob.high.toFixed(2)}` : "the 1m OB in the refinement data";
+  return [
+    `ENTRY TRIGGER for plan ${t.poi.id} ${side.toUpperCase()} (${t.poi.level_type}): ${t.text}.`,
+    `Default action: SETUP now — propose_setup entry_style "market" at live price, or "limit" inside the 1m OB ${ob} if price already moved ${side === "long" ? "above" : "below"} it.`,
+    `SL beyond the 1m swing that made the BMS or the sweep extreme, whichever is structural (${mode.minSlPips ?? "?"}–${mode.maxSlPips ?? "?"}p), TP1 at the 5m BMS swing / opposite liquidity (plan targets: ${t.poi.targets?.join(", ") || "see plan"}), setup_type sh_bms_rto / sms_bms_rto to match, plan_poi in confluence.`,
+    "WATCH/AVOID only for a concrete invalidation: price closed beyond the SL level, RR below minimum within the TP limit, or a news blackout.",
   ].join(" ");
 }
 
@@ -424,7 +440,11 @@ async function runWatcher() {
   // completes the setup (often a few bars later, after price has left the zone).
   const pip = config.broker.pipSize || 0.1;
   const nearPoi = pois.some((p) => price >= p.zone_low - 30 * pip && price <= p.zone_high + 30 * pip);
-  if (pois.length && (nearPoi || Date.now() < _armedUntil) && Date.now() - _lastBmsCheck >= BMS_CHECK_MS) {
+  // While a completed 5m trigger waits for its 1m entry, check every minute (same 1 credit: 5m is built from 1m).
+  const refining = Date.now() < _refineUntil;
+  const checkEvery = refining ? REFINE_CHECK_MS : BMS_CHECK_MS;
+  let refineReady = false;
+  if (pois.length && (nearPoi || refining || Date.now() < _armedUntil) && Date.now() - _lastBmsCheck >= checkEvery) {
     _lastBmsCheck = Date.now();
     const profile = getStructureProfile(mode);
     const entry = await getEntryCandles(price, profile.trigger.key);
@@ -436,14 +456,29 @@ async function runWatcher() {
       // The watcher only holds TradingView's 5m bar; other trigger TFs go without a live bar.
       const live = profile.trigger.tf === "5m" ? m5 : null;
       const state = ltfTriggerState(withLiveBar(entry, live, profile.trigger.tf, Date.now()), pools);
-      triggers.push(...detectBmsTriggers({
-        state,
-        pois,
-        price,
-        lastFired: _firedTriggers,
-        cooldownMs: (config.watcher?.cooldownMin ?? 30) * 60_000,
-        tolerancePips: config.plan?.poiTolerancePips ?? 30,
-      }));
+      const cooldownMs = (config.watcher?.cooldownMin ?? 30) * 60_000;
+      const tolerancePips = config.plan?.poiTolerancePips ?? 30;
+      const bms = detectBmsTriggers({ state, pois, price, lastFired: _firedTriggers, cooldownMs, tolerancePips });
+      triggers.push(...bms);
+      const refine = profile.refine
+        ? refineState({ [profile.refine.key]: await getEntryCandles(price, profile.refine.key) }, profile, pools)
+        : null;
+      refineReady = Boolean(refine);
+      if (refine) {
+        if (bms.length) _refineUntil = Date.now() + REFINE_MS;
+        triggers.push(...detectRefineTriggers({
+          state,
+          refine,
+          pois,
+          price,
+          lastFired: _firedTriggers,
+          cooldownMs,
+          tolerancePips,
+          maxBmsBarsAgo: config.screening?.maxBmsBarsAgo ?? 24,
+          tf: profile.trigger.tf,
+          rtf: profile.refine.tf,
+        }));
+      }
     }
   }
   if (!triggers.length) return;
@@ -451,16 +486,22 @@ async function runWatcher() {
   for (const t of triggers) _firedTriggers.set(t.key, Date.now());
   const text = triggers.map((t) => t.text).join("; ");
   log("watcher", `Trigger: ${text}`);
-  const announce = config.watcher?.notifyPoiTouch !== false && triggers.some((t) => t.kind === "poi" || t.kind === "bms");
+  const ICON = { poi: "📍", bms: "⚡", refine: "🎯" };
+  // With 1m refinement a 5m BMS only arms the entry; screening waits for the 1m trigger.
+  const screenable = refineReady ? triggers.filter((t) => t.kind !== "bms") : triggers;
+  const announced = triggers.filter((t) => ICON[t.kind]);
+  const announce = config.watcher?.notifyPoiTouch !== false && announced.length > 0;
   if (announce) {
-    const lines = triggers.filter((t) => t.kind === "poi" || t.kind === "bms")
-      .map((t) => `${t.kind === "bms" ? "⚡" : "📍"} ${t.text}`);
-    await sendMessage(`${lines.join("\n")}\nScreening for a trigger now…`);
+    const lines = announced.map((t) => `${ICON[t.kind]} ${t.text}`);
+    const tail = screenable.length ? "Screening for a trigger now…" : "Armed — waiting for the RTO into the 5m OB + a 1m BMS (checked every minute).";
+    await sendMessage(`${lines.join("\n")}\n${tail}`);
   }
+  if (!screenable.length) return;
   const startedAt = Date.now();
-  // A completed BMS trigger takes priority over plain POI touches in the same minute.
-  const completed = triggers.filter((t) => t.kind === "bms");
-  const result = await runScreeningCycle({ trigger: completed.length ? completed.map((t) => t.text).join("; ") : text, completed });
+  // A completed trigger takes priority over plain POI touches in the same minute: 1m entry first, then 5m BMS.
+  const refined = screenable.filter((t) => t.kind === "refine");
+  const completed = refined.length ? refined : screenable.filter((t) => t.kind === "bms");
+  const result = await runScreeningCycle({ trigger: completed.length ? completed.map((t) => t.text).join("; ") : screenable.map((t) => t.text).join("; "), completed });
   // Close the loop on the 📍 message (a logged setup already sent its own alert).
   if (announce && typeof result === "string" && !result.startsWith("🥋 SHAOLIN SETUP")) {
     const blockedNow = getRecentScreeningDecisions(10)

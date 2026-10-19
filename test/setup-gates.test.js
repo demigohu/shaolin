@@ -106,3 +106,16 @@ test("trigger gate: turtle soup needs the opposite pool swept", async () => {
   assert.equal(validateTriggerComplete({ side: "short", setup_type: "turtle_soup_short" }, ctx([{ side: "bsl" }])).ok, true);
   assert.equal(validateTriggerComplete({ side: "long", setup_type: "sh_bms_rto" }, null).ok, true);
 });
+
+test("trigger gate: with 1m refinement, BMS setups need the 5m RTO and a fresh 1m BMS", async () => {
+  const { validateTriggerComplete } = await import("../tools/setup-gates.js");
+  const bear = { dir: "bearish", level: 4160, bars_ago: 3 };
+  const ctx = (rto, refineBms) => ({ profile: { trigger_tf: "5m", refine_tf: "1m" }, trigger: { bms: bear, rto, sweeps: [] }, refine: { bms: refineBms } });
+  const args = { side: "short", setup_type: "sh_bms_rto" };
+  assert.equal(validateTriggerComplete(args, ctx("not yet", { dir: "bearish", level: 1, bars_ago: 1 })).reason, "refine_no_rto");
+  assert.equal(validateTriggerComplete(args, ctx("touched", null)).reason, "refine_pending");
+  assert.equal(validateTriggerComplete(args, ctx("touched", { dir: "bullish", level: 1, bars_ago: 1 })).reason, "refine_pending");
+  assert.equal(validateTriggerComplete(args, ctx("touched", { dir: "bearish", level: 1, bars_ago: 9 })).reason, "refine_pending");
+  assert.equal(validateTriggerComplete(args, ctx("touched", { dir: "bearish", level: 1, bars_ago: 2 })).ok, true);
+  assert.equal(validateTriggerComplete({ side: "short", setup_type: "turtle_soup_short" }, { ...ctx("not yet", null), trigger: { bms: null, sweeps: [{ side: "bsl" }] } }).ok, true);
+});

@@ -163,11 +163,15 @@ export function measureBasis(m5Candles, anchors) {
 // 5m + 15m, one 1h series feeds 1h + 4h, the daily series feeds PDH/PWH/PMH.
 const TD_URL = "https://api.twelvedata.com/time_series";
 const TD_SERIES = {
+  // One 1min request (1 credit) also yields 5m/15m: 5000 bars ≈ 83h ≥ the 600 5m bars needed.
+  "1min": { size: 5000, ttl: 55_000 },
   "5min": { size: 600, ttl: 60_000 },
   "1h": { size: 400, ttl: 300_000 },
   "1day": { size: 400, ttl: 30 * 60_000 },
 };
 const M15_MS = 15 * 60_000;
+const M5_MS = 5 * 60_000;
+const MIN_M1_BARS = 3000;
 const MAX_SPOT_GAP = 10; // $ — larger means one of the feeds is wrong
 
 /** Twelve Data `values` (UTC datetimes, strings) → ascending candles. */
@@ -205,16 +209,39 @@ async function fetchTwelveData(interval) {
   return candles;
 }
 
-async function twelveDataCandleSet(spotPrice) {
-  const m5 = await fetchTwelveData("5min");
-  const h1 = await fetchTwelveData("1h");
-  const d1 = await fetchTwelveData("1day");
-  // Both feeds are spot and real time: the residual gap is a small, live-measured offset.
-  let basis = m5.length ? m5.at(-1).c - spotPrice : 0;
+let m1Unavailable = false;
+
+/** 1m bars (and 5m built from them); falls back to the 5min series without 1m. */
+async function fetchEntrySeries() {
+  if (!m1Unavailable) {
+    try {
+      const m1 = await fetchTwelveData("1min");
+      if (m1.length >= MIN_M1_BARS) return { m1, m5: aggregateCandles(m1, M5_MS) };
+      throw new Error(`only ${m1.length} bars`);
+    } catch (error) {
+      log("candles_warn", `Twelve Data 1min unusable (${error.message}) — using 5min without 1m refinement for 1h`);
+      m1Unavailable = true;
+      setTimeout(() => { m1Unavailable = false; }, 3_600_000).unref?.();
+    }
+  }
+  return { m1: null, m5: await fetchTwelveData("5min") };
+}
+
+/** Both feeds are spot and real time: the residual gap is a small, live-measured offset. */
+function spotBasis(series, spotPrice) {
+  const basis = series.length ? series.at(-1).c - spotPrice : 0;
   if (Math.abs(basis) > MAX_SPOT_GAP) {
     log("candles_warn", `Twelve Data vs feed gap ${basis.toFixed(2)} too large — using 0`);
-    basis = 0;
+    return 0;
   }
+  return basis;
+}
+
+async function twelveDataCandleSet(spotPrice) {
+  const { m1, m5 } = await fetchEntrySeries();
+  const h1 = await fetchTwelveData("1h");
+  const d1 = await fetchTwelveData("1day");
+  const basis = spotBasis(m5, spotPrice);
   const h1Spot = shiftCandles(h1, basis);
   const m5Spot = shiftCandles(m5, basis);
   // Twelve Data dailies close at 00:00 UTC; gold sessions close 17:00 New York. Rebuild the
@@ -226,6 +253,7 @@ async function twelveDataCandleSet(spotPrice) {
   return {
     source: "twelvedata",
     basis: Number(basis.toFixed(2)),
+    m1: m1 ? shiftCandles(m1, basis) : null,
     m5: m5Spot,
     m15: aggregateCandles(m5Spot, M15_MS),
     h1: h1Spot,
@@ -236,17 +264,21 @@ async function twelveDataCandleSet(spotPrice) {
 }
 
 /**
- * Entry-timeframe candles only (watcher BMS checks): one Twelve Data request,
- * or the cached Yahoo set as fallback. `key` = m5 | m15 | h1.
+ * Entry-timeframe candles only (watcher checks): one Twelve Data request, or the
+ * cached Yahoo set as fallback (no 1m there). `key` = m1 | m5 | m15 | h1.
  */
 export async function getEntryCandles(spotPrice, key = "m5") {
   if (spotPrice == null) return null;
   if (process.env.TWELVEDATA_API_KEY) {
     try {
-      const raw = await fetchTwelveData(key === "h1" ? "1h" : "5min");
-      let basis = raw.length ? raw.at(-1).c - spotPrice : 0;
-      if (Math.abs(basis) > MAX_SPOT_GAP) basis = 0;
-      const spot = shiftCandles(raw, basis);
+      if (key === "h1") {
+        const h1 = await fetchTwelveData("1h");
+        return shiftCandles(h1, spotBasis(h1, spotPrice));
+      }
+      const { m1, m5 } = await fetchEntrySeries();
+      const basis = spotBasis(m5, spotPrice);
+      if (key === "m1") return m1 ? shiftCandles(m1, basis) : null;
+      const spot = shiftCandles(m5, basis);
       return key === "m15" ? aggregateCandles(spot, M15_MS) : spot;
     } catch (error) {
       log("candles_warn", `Twelve Data entry candles failed (${error.message}) — falling back to Yahoo`);

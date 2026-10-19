@@ -68,6 +68,9 @@ HOW TO DECIDE (every cycle):
    - sms_bms_rto: failure swing (lower high / higher low) AND BMS → COMPLETE → same limit-at-OB entry.
    - bms_rto_ote: BMS in the HTF direction → COMPLETE → limit at the OB or 50–72% of the BMS leg.
    - amd_distribution: Asian range, London/NY false move beyond it, then BMS back → COMPLETE → limit at the OB.
+   When a "1m ENTRY REFINEMENT" block is present, the BMS setups above are only ARMED by the 5m BMS: follow that
+   block's ENTRY RULE (RTO into the 5m OB, then a 1m BMS the trade's way → market or limit at the 1m OB) instead
+   of a resting limit at the 5m OB. Turtle soup is unchanged.
    The BMS must point the TRADE's way (bearish BMS for a short, bullish for a long); a BMS against your side
    is no trigger. propose_setup verifies this on the candles and rejects an incomplete trigger.
    Do NOT stack extra confirmations the definition doesn't list: no rejection candle after the RTO, no 15m

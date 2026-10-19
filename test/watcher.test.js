@@ -61,3 +61,18 @@ test("BMS triggers carry the POI, the OB and a computed price-vs-OB relation", a
   assert.match(t.text, /price 4155.57 is INSIDE it now/);
   assert.equal(priceVsZone(4160, { low: 4154, high: 4158 }), "price 4160 is 20p above it");
 });
+
+test("refine trigger: 5m RTO touched + fresh 1m BMS the POI's way", async () => {
+  const { detectRefineTriggers } = await import("../watcher.js");
+  const pois = [{ id: "P1", side: "short", zone_low: 4170, zone_high: 4175, level_type: "PDH" }];
+  const state = { bms: { dir: "bearish", level: 4168, bars_ago: 3 }, ob: { low: 4170, high: 4172 }, rto: "touched" };
+  const refine = { bms: { dir: "bearish", level: 4170.5, bars_ago: 1 }, ob: { low: 4171, high: 4171.6 } };
+  const hits = detectRefineTriggers({ state, refine, pois, price: 4170.4 });
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].kind, "refine");
+  assert.equal(detectRefineTriggers({ state: { ...state, rto: "not yet" }, refine, pois, price: 4170.4 }).length, 0);
+  assert.equal(detectRefineTriggers({ state, refine: { ...refine, bms: { ...refine.bms, dir: "bullish" } }, pois, price: 4170.4 }).length, 0);
+  assert.equal(detectRefineTriggers({ state, refine: { ...refine, bms: { ...refine.bms, bars_ago: 4 } }, pois, price: 4170.4 }).length, 0);
+  const fired = new Map([["refine:P1", Date.now()]]);
+  assert.equal(detectRefineTriggers({ state, refine, pois, price: 4170.4, lastFired: fired }).length, 0);
+});
