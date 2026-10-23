@@ -121,6 +121,33 @@ function validateRefinement(ctx, want) {
   return { ok: true };
 }
 
+/**
+ * SL parked on a liquidity extreme gets taken on the retest (broker quote + spread differ
+ * from the feed by cents). Sweep wicks and today's HOD/LOD need a real buffer beyond them.
+ */
+export function validateSlBuffer(args, ctx) {
+  const sl = Number(args.sl);
+  if (!ctx || !Number.isFinite(sl)) return { ok: true };
+  const buf = (config.smc?.slBelowSweepPips ?? 10) * pipSize();
+  const long = args.side === "long";
+  const side = long ? "ssl" : "bsl";
+  const wicks = [ctx.trigger?.sweeps, ctx.refine?.sweeps]
+    .flatMap((list) => (list || []).filter((w) => w.side === side).map((w) => w.wick));
+  const dayExtreme = long ? ctx.lod : ctx.hod;
+  if (dayExtreme != null) wicks.push(dayExtreme);
+  for (const w of wicks.filter(Number.isFinite)) {
+    if (Math.abs(sl - w) < buf) {
+      const target = long ? w - buf : w + buf;
+      return {
+        ok: false,
+        reason: "sl_on_liquidity",
+        message: `SL ${sl} sits ${toPips(Math.abs(sl - w))}p from the ${long ? "low" : "high"} ${w.toFixed(2)} — retests of that extreme stop it out. Put SL ${long ? "at/below" : "at/above"} ${target.toFixed(2)} (${config.smc?.slBelowSweepPips ?? 10}p beyond) if RR still works, else WATCH.`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
 export function validateProposedSl(args, ctx, mode) {
   const entry = Number(args.entry);
   const sl = Number(args.sl);

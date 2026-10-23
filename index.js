@@ -339,7 +339,7 @@ export async function runManagementCycle({ silent = false, forceDigest = false, 
     const updated = [];
     const resolved = [];
     for (const setup of getOpenSetups()) {
-      const r = evaluateSetup(setup, price, mode);
+      const r = evaluateSetup(setup, price, mode, quote.bar);
       events.push(...r.events);
       updated.push(r.setup);
       if (r.resolved) resolved.push(r.setup.id);

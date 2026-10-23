@@ -31,13 +31,15 @@ test("price gapping through both TPs in one poll closes everything", () => {
   assert.equal(s.partial_filled.length, 2);
 });
 
-test("TP1 then SL is a partial, pnl weighted", () => {
+test("TP1 moves the tracked SL to breakeven; a return to entry closes the rest flat", () => {
   const s = makeSetup();
   evaluateSetup(s, 2004, mode);
-  const r = evaluateSetup(s, 1995, mode);
-  assert.equal(s.outcome, "tp_partial_then_sl");
-  assert.equal(s.pnl_pips, 0); // +20 on half, -20 on half
+  assert.equal(s.sl, 2000);
+  assert.equal(s.original_sl, 1996);
+  const r = evaluateSetup(s, 1999.9, mode);
   assert.equal(r.resolved, true);
+  assert.equal(s.outcome, "tp_partial_then_be");
+  assert.equal(s.pnl_pips, 20); // +40 on half, 0 on half
 });
 
 test("near-TP alert fires once per level", () => {
@@ -87,4 +89,25 @@ test("expiry: unfilled after maxAge expires; filled gets a time exit at price", 
 test("realizedPnlPips for shorts", () => {
   const s = makeSetup({ side: "short", entry: 2000, sl: 2004, partial_filled: [{ level: 1, close_pct: 50, price: 1996 }], remaining_pct: 50 });
   assert.equal(realizedPnlPips(s, 2004), 0);
+});
+
+test("a wick to SL between polls counts once the bar opened after the fill", () => {
+  const s = makeSetup({ activated_at: new Date(Date.now() - 20 * 60_000).toISOString() });
+  const bar = { t: Date.now() - 2 * 60_000, high: 2001, low: 1995.9 };
+  const r = evaluateSetup(s, 2000.5, mode, bar);
+  assert.equal(r.resolved, true);
+  assert.equal(s.outcome, "sl_hit");
+  assert.equal(s.pnl_pips, -40);
+});
+
+test("a bar that opened before the fill cannot stop the trade out", () => {
+  const s = makeSetup({ activated_at: new Date(Date.now() - 60_000).toISOString() });
+  const bar = { t: Date.now() - 4 * 60_000, high: 2001, low: 1995.9 };
+  assert.equal(evaluateSetup(s, 2000.5, mode, bar).resolved, false);
+});
+
+test("bar high reaching TP1 between polls takes the partial", () => {
+  const s = makeSetup({ activated_at: new Date(Date.now() - 20 * 60_000).toISOString() });
+  const r = evaluateSetup(s, 2002, mode, { t: Date.now() - 60_000, high: 2004.2, low: 2001 });
+  assert.ok(r.events.some((e) => e.includes("TP1 HIT")));
 });

@@ -28,7 +28,7 @@ function save(data) {
   fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
 }
 
-const FILLED_OUTCOMES = new Set(["sl_hit", "tp_hit", "tp_full", "tp_partial_then_sl", "time_exit"]);
+const FILLED_OUTCOMES = new Set(["sl_hit", "tp_hit", "tp_full", "tp_partial_then_sl", "tp_partial_then_be", "time_exit"]);
 
 /** A filled position (entered on MT5), as opposed to a limit that never triggered. */
 export const isTrade = (d) => (d.filled ?? FILLED_OUTCOMES.has(d.outcome)) && d.outcome !== "cancelled";

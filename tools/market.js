@@ -149,6 +149,17 @@ export async function getXauusdCombined(timeframe) {
   return { symbol: config.market.feedLabel, timeframe: tf, technical, news: await getGoldHeadlines() };
 }
 
+const BAR_MS = { "5m": 300_000, "15m": 900_000, "1h": 3_600_000 };
+
+/** The live bar's range: polls are 45s apart, so SL/TP touches between polls only show in its high/low. */
+function currentBar(analysis, tf, now = Date.now()) {
+  const pd = analysis?.price_data || {};
+  const high = Number(pd.high);
+  const low = Number(pd.low);
+  if (!BAR_MS[tf] || !Number.isFinite(high) || !Number.isFinite(low)) return null;
+  return { t: Math.floor(now / BAR_MS[tf]) * BAR_MS[tf], high, low };
+}
+
 /**
  * Live price on the screening feed (TVC:GOLD). There is deliberately no Yahoo
  * fallback: its COMEX quote is futures (basis away from spot) and ~10 min
@@ -164,7 +175,7 @@ export async function getManagementPrice() {
     }
     const price = extractPriceFromAnalysis(analysis);
     if (price != null) {
-      return { price, source: "tradingview", timeframe: tf, symbol: config.market.feedLabel };
+      return { price, bar: currentBar(analysis, tf), source: "tradingview", timeframe: tf, symbol: config.market.feedLabel };
     }
     errors.push(`tv/${tf}: no price in response`);
   }

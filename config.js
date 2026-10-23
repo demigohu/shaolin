@@ -151,6 +151,8 @@ export const config = {
   },
   management: {
     breakevenAlertAfterTp1: m.breakevenAlertAfterTp1 ?? u.breakevenAlertAfterTp1 ?? true,
+    // After TP1 the bot moves its tracked SL to entry, matching the breakeven move on MT5.
+    trackBreakeven: m.trackBreakeven !== false,
     fastPollEnabled: m.fastPollEnabled !== false,
     fastPollSec: m.fastPollSec ?? 45,
     priceStreamTelegram: m.priceStreamTelegram !== false,

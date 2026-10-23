@@ -83,6 +83,8 @@ function deriveLesson(setup) {
     case "tp_hit":
     case "tp_full":
       return `[WORKED @ ${mode}] ${head}: ${setup.outcome} (+${pnl}p)`;
+    case "tp_partial_then_be":
+      return `[PARTIAL WIN @ ${mode}] ${head}: TP partial then breakeven (+${pnl}p)`;
     case "tp_partial_then_sl":
       return `[${pnl > 0 ? "PARTIAL WIN" : "FAILED"} @ ${mode}] ${head}: TP partial then SL (${pnl}p)`;
     case "sl_hit":

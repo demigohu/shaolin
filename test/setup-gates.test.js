@@ -119,3 +119,13 @@ test("trigger gate: with 1m refinement, BMS setups need the 5m RTO and a fresh 1
   assert.equal(validateTriggerComplete(args, ctx("touched", { dir: "bearish", level: 1, bars_ago: 2 })).ok, true);
   assert.equal(validateTriggerComplete({ side: "short", setup_type: "turtle_soup_short" }, { ...ctx("not yet", null), trigger: { bms: null, sweeps: [{ side: "bsl" }] } }).ok, true);
 });
+
+test("SL must sit a buffer beyond sweep wicks and the day's extreme", async () => {
+  const { validateSlBuffer } = await import("../tools/setup-gates.js");
+  const ctx = { lod: 4010.1, hod: 4040, trigger: { sweeps: [{ side: "ssl", wick: 4010.1 }] }, refine: null };
+  assert.equal(validateSlBuffer({ side: "long", sl: 4010 }, ctx).reason, "sl_on_liquidity");
+  assert.equal(validateSlBuffer({ side: "long", sl: 4009.1 }, ctx).ok, true);
+  assert.equal(validateSlBuffer({ side: "long", sl: 4013 }, ctx).ok, true);
+  assert.equal(validateSlBuffer({ side: "short", sl: 4040.4 }, ctx).reason, "sl_on_liquidity");
+  assert.equal(validateSlBuffer({ side: "short", sl: 4041 }, ctx).ok, true);
+});

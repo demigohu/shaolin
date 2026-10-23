@@ -33,20 +33,35 @@ export function resolveInPlace(setup, outcome, { exitPrice = null, ...extra } = 
 }
 
 /**
- * Advance one setup against the live price. Mutates and returns { setup, events, resolved }.
- * SL/TP fills are booked at the level price (stop/limit orders), not the poll price.
+ * Extremes the order could have been touched at since `sinceIso`: the poll price, plus the
+ * live bar's high/low when that bar opened after `sinceIso` (an older bar's range may predate it).
  */
-export function evaluateSetup(setup, price, mode) {
+function touchRange(price, bar, sinceIso) {
+  const since = Date.parse(sinceIso || "");
+  const usable = bar && Number.isFinite(since) && bar.t >= since;
+  return { low: usable ? Math.min(price, bar.low) : price, high: usable ? Math.max(price, bar.high) : price };
+}
+
+/**
+ * Advance one setup against the live price (and the live bar's range, so wicks between
+ * polls count). Mutates and returns { setup, events, resolved }.
+ * SL/TP fills are booked at the level price (stop/limit orders), not the poll price.
+ * When one bar spans both SL and a TP, SL is assumed first (conservative).
+ */
+export function evaluateSetup(setup, price, mode, bar = null) {
   const events = [];
   const zonePips = mode.entryZonePips ?? 3;
 
   if (setup.status === "proposed") {
+    const r = touchRange(price, bar, setup.proposed_at);
+    // The wick toward the limit is the one that fills it.
+    const fillPrice = setup.side === "long" ? r.low : r.high;
     if (shouldInvalidatePreFill(setup, price)) {
       resolveInPlace(setup, "invalidated_pre_fill");
       events.push(`❌ SL before fill ${setup.id} @ ${price} (limit never activated — cancel the order on MT5)`);
       return { setup, events, resolved: true };
     }
-    if (setup.entry_style === "limit" && !isLimitFilled(setup, price, zonePips)) {
+    if (setup.entry_style === "limit" && !isLimitFilled(setup, price, zonePips) && !isLimitFilled(setup, fillPrice, 0)) {
       if (shouldExpireStaleByDistance(setup, price, mode)) {
         resolveInPlace(setup, "stale_no_fill", { stale_distance_pips: distanceFromEntryPips(setup, price) });
         events.push(`⌛ STALE ${setup.id} — price ran ${distanceFromEntryPips(setup, price)}p away without fill (cancel the limit on MT5)`);
@@ -60,23 +75,27 @@ export function evaluateSetup(setup, price, mode) {
   }
 
   const { side, entry, sl } = setup;
-  const risk = Math.abs(entry - sl);
+  const risk = Math.abs(entry - (setup.original_sl ?? sl));
   if (risk > 0) {
     const rr = side === "long" ? (price - entry) / risk : (entry - price) / risk;
     setup.max_rr_reached = Math.round(Math.max(setup.max_rr_reached || 0, rr) * 100) / 100;
   }
 
-  if (side === "long" ? price <= sl : price >= sl) {
-    const outcome = setup.partial_filled?.length ? "tp_partial_then_sl" : "sl_hit";
+  const range = touchRange(price, bar, setup.activated_at);
+  const worst = side === "long" ? range.low : range.high;
+  const best = side === "long" ? range.high : range.low;
+
+  if (side === "long" ? worst <= sl : worst >= sl) {
+    const outcome = setup.original_sl != null ? "tp_partial_then_be" : setup.partial_filled?.length ? "tp_partial_then_sl" : "sl_hit";
     resolveInPlace(setup, outcome, { exitPrice: sl });
-    events.push(`🛑 SL HIT ${setup.id} @ ${price} (${setup.pnl_pips} pips)`);
+    events.push(`🛑 SL HIT ${setup.id} @ ${worst === price ? price : `${sl} (bar ${side === "long" ? "low" : "high"} ${worst})`} (${setup.pnl_pips} pips)`);
     return { setup, events, resolved: true };
   }
 
   const levels = setup.tp_levels || [];
   for (const tp of levels) {
     if (tp.status === "hit") continue;
-    if (!(side === "long" ? price >= tp.price : price <= tp.price)) break; // ladder is ordered
+    if (!(side === "long" ? best >= tp.price : best <= tp.price)) break; // ladder is ordered
     tp.status = "hit";
     tp.hit_at = nowIso();
     tp.hit_price = price;
@@ -90,7 +109,14 @@ export function evaluateSetup(setup, price, mode) {
     }
     if (tp.level === 1 && config.management?.breakevenAlertAfterTp1 !== false && !setup.be_alerted) {
       setup.be_alerted = true;
-      events.push(`🔒 ${setup.id}: TP1 done — consider moving SL to breakeven ${entry} on MT5`);
+      // Track what the trader does on MT5: the rest of the position now risks nothing.
+      if (config.management?.trackBreakeven !== false) {
+        setup.original_sl = sl;
+        setup.sl = entry;
+        events.push(`🔒 ${setup.id}: TP1 done — move SL to breakeven ${entry} on MT5 (bot now tracks SL at ${entry})`);
+      } else {
+        events.push(`🔒 ${setup.id}: TP1 done — consider moving SL to breakeven ${entry} on MT5`);
+      }
     }
   }
 
