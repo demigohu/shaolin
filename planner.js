@@ -12,6 +12,7 @@ import { jsonrepair } from "jsonrepair";
 import { repoPath } from "./repo-root.js";
 import { config } from "./config.js";
 import { log } from "./logger.js";
+import { markOk, markFail } from "./health.js";
 import { getActiveMode } from "./modes.js";
 import { buildSMCContext, formatSMCForPrompt, SETUP_TYPES, getStructureProfile } from "./smc.js";
 import { getCalendarEvents, formatCalendarForPrompt } from "./tools/calendar.js";
@@ -196,6 +197,7 @@ export async function createPlan({ reason = "scheduled" } = {}) {
         temperature: config.llm.temperature,
         max_tokens: config.llm.maxTokens,
       });
+      markOk("llm");
       const raw = parseToolArgs(response.choices?.[0]?.message);
       clean = sanitizePlan(raw, { price: ctx.price, reach });
       if (clean.dropped.length) log("plan_warn", `Dropped POIs: ${clean.dropped.join(" | ")}`);
@@ -208,6 +210,7 @@ export async function createPlan({ reason = "scheduled" } = {}) {
       });
     } catch (error) {
       lastError = error;
+      if (error?.status) markFail("llm", error);
       log("plan_warn", `Planner attempt ${attempt + 1} failed: ${error.message}`);
     }
   }

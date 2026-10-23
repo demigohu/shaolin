@@ -51,7 +51,36 @@ export function buildPerformanceStats(trades) {
     by_side: groupBy(trades, (t) => t.side),
     by_type_session: groupBy(trades, (t) => (t.setup_type && t.session ? `${t.setup_type}@${t.session}` : null)),
     by_confluence: groupBy(trades, (t) => t.confluence_factors || []),
+    by_confidence: groupBy(trades, (t) => confidenceBucket(t.confidence)),
   };
+}
+
+/** Stated confidence in 5-point bands, so it can be compared with the realised win rate. */
+export function confidenceBucket(confidence) {
+  const c = Number(confidence);
+  if (!Number.isFinite(c)) return null;
+  if (c < 65) return "<65";
+  if (c >= 85) return "85+";
+  const lo = Math.floor(c / 5) * 5;
+  return `${lo}-${lo + 4}`;
+}
+
+/**
+ * Stated confidence vs realised win rate per band (bands with ≥ minN trades):
+ * "70-74: stated ~72%, won 40% (n=10) — overconfident by 32".
+ */
+export function formatConfidenceCalibration(trades, minN = 5) {
+  const rows = [];
+  const bands = groupBy(trades, (t) => confidenceBucket(t.confidence));
+  for (const [band, st] of Object.entries(bands).sort()) {
+    if (st.n < minN) continue;
+    const members = trades.filter((t) => confidenceBucket(t.confidence) === band);
+    const stated = Math.round(members.reduce((a, t) => a + Number(t.confidence), 0) / members.length);
+    const gap = stated - st.win_rate;
+    const verdict = Math.abs(gap) < 10 ? "well calibrated" : gap > 0 ? `overconfident by ${gap}` : `underconfident by ${-gap}`;
+    rows.push(`  ${band}: stated ~${stated}%, won ${st.win_rate}% (n=${st.n}, net ${st.net_pips}p) — ${verdict}`);
+  }
+  return rows.length ? ["Confidence calibration (stated vs realised win rate):", ...rows] : [];
 }
 
 /**
@@ -103,5 +132,6 @@ export function formatPerformanceStats(modeId) {
     ...formatGroup("By session", s.by_session, 2),
     ...formatGroup("By side", s.by_side, 2),
     ...formatGroup("By confluence tag", s.by_confluence, 3),
+    ...formatConfidenceCalibration(trades, config.performanceGate?.calibrationMinTrades ?? 5),
   ].join("\n");
 }

@@ -3,6 +3,7 @@ import { callMcpTool, closeMcp } from "./mcp-client.js";
 import { getActiveMode } from "../modes.js";
 import { log } from "../logger.js";
 import { getGoldHeadlines } from "./news.js";
+import { markOk, markFail } from "../health.js";
 
 const ANALYSIS_TTL_MS = 30_000;
 const BACKOFF_MS = 90_000;
@@ -56,7 +57,9 @@ export async function fetchAnalysis(timeframe, { maxAgeMs = ANALYSIS_TTL_MS } = 
   analysisCache.set(timeframe, { at: Date.now(), promise });
 
   const result = await promise;
+  if (extractPriceFromAnalysis(result) != null) markOk("price");
   if (result?.error) {
+    markFail("price", result.error);
     analysisCache.delete(timeframe);
     tvBackoffUntil = Date.now() + BACKOFF_MS;
     log("tv_warn", `TradingView ${timeframe} failed (${String(result.error).slice(0, 120)}) — backing off ${BACKOFF_MS / 1000}s`);

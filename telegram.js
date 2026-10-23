@@ -68,6 +68,29 @@ export async function sendMessage(text, chatId = null) {
   return telegramApi("sendMessage", { chat_id: targetChatId, text: text.slice(0, 4000) });
 }
 
+/** Send a PNG (Buffer) with an optional caption; failures are logged, never thrown. */
+export async function sendPhoto(png, caption = "", chatId = null) {
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  const targetChatId = chatId ?? process.env.TELEGRAM_CHAT_ID?.trim();
+  if (!token || !targetChatId || !png) return { ok: false, skipped: true };
+  try {
+    const form = new FormData();
+    form.append("chat_id", targetChatId);
+    if (caption) form.append("caption", caption.slice(0, 1000));
+    form.append("photo", new Blob([png], { type: "image/png" }), "setup.png");
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form, signal: AbortSignal.timeout(30_000) });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.ok === false) {
+      log("telegram_error", `sendPhoto: ${JSON.stringify(body).slice(0, 300)}`);
+      return { ok: false, error: body };
+    }
+    return { ok: true, result: body.result };
+  } catch (error) {
+    log("telegram_error", `sendPhoto: ${error.message}`);
+    return { ok: false, error: error.message };
+  }
+}
+
 export async function editMessage(text, messageId, chatId = null) {
   const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
   const targetChatId = chatId ?? process.env.TELEGRAM_CHAT_ID?.trim();

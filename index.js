@@ -21,7 +21,9 @@ import {
   formatEventAlert,
   formatScreeningDigest,
 } from "./notifications.js";
-import { sendMessage, startPolling, isEnabled as telegramEnabled, getTelegramStatus } from "./telegram.js";
+import { sendMessage, sendPhoto, startPolling, isEnabled as telegramEnabled, getTelegramStatus } from "./telegram.js";
+import { setupChartSvg, renderPng } from "./chart.js";
+import { collectHealthAlerts, formatHealth, markOk as healthOk, markFail as healthFail } from "./health.js";
 import { closeMcp } from "./tools/mcp-client.js";
 import { getManagementPrice, fetchAnalysis, extractPriceFromAnalysis, isTradingViewBackingOff } from "./tools/market.js";
 import { getActivePlan, createPlan, checkPlanInvalidation, formatPlanForPrompt, formatPlanMessage } from "./planner.js";
@@ -43,6 +45,7 @@ let _screenCycleCount = 0;
 let cronTasks = [];
 let fastMgmtTimer = null;
 let watcherTimer = null;
+let healthTimer = null;
 let _planningBusy = false;
 let _lastPlanAt = 0;
 let _lastScreeningAt = 0;
@@ -112,6 +115,24 @@ function refinedEntryTask(t, mode) {
     `SL beyond the 1m swing that made the BMS or the sweep extreme, whichever is structural (${mode.minSlPips ?? "?"}–${mode.maxSlPips ?? "?"}p), TP1 at the 5m BMS swing / opposite liquidity (plan targets: ${t.poi.targets?.join(", ") || "see plan"}), setup_type sh_bms_rto / sms_bms_rto to match, plan_poi in confluence.`,
     "WATCH/AVOID only for a concrete invalidation: price closed beyond the SL level, RR below minimum within the TP limit, or a news blackout.",
   ].join(" ");
+}
+
+/** Entry-TF candles with entry/SL/TP and the plan POI, as a photo under the setup alert. */
+async function sendSetupChart(setup) {
+  if (config.notifications?.setupChart === false) return;
+  const profile = getStructureProfile(getActiveMode());
+  const candles = await getEntryCandles(getLastSMCContext()?.price ?? setup.entry, profile.trigger.key);
+  if (!candles?.length) return;
+  const poi = getActivePlan()?.pois?.find((p) => p.id === setup.poi_id) ?? null;
+  const grade = setup.grade ? ` · ${setup.grade}${setup.poi_id ? ` (${setup.poi_id})` : ""}` : "";
+  const svg = setupChartSvg({
+    candles,
+    setup,
+    zone: poi,
+    tf: profile.trigger.tf,
+    title: `${config.market.displayName} ${setup.side.toUpperCase()} · ${setup.setup_type || "setup"}${grade}`,
+  });
+  await sendPhoto(renderPng(svg), setup.id);
 }
 
 export async function runScreeningCycle({ silent = false, trigger = null, completed = [] } = {}) {
@@ -242,6 +263,7 @@ export async function runScreeningCycle({ silent = false, trigger = null, comple
       });
       // Setup alerts always go out — they are the product, even on silent/manual runs.
       await sendMessage(formatSetupAlert(setup));
+      await sendSetupChart(setup).catch((e) => log("chart_warn", e.message));
       log("screen", `Setup logged: ${setup.id} [${setup.entry_style || "market"}]`);
       syncFastManagementTimer();
       return formatSetupAlert(setup);
@@ -448,6 +470,8 @@ async function runWatcher() {
     _lastBmsCheck = Date.now();
     const profile = getStructureProfile(mode);
     const entry = await getEntryCandles(price, profile.trigger.key);
+    if (entry?.length) healthOk("candles");
+    else healthFail("candles", "no entry candles");
     if (entry?.length) {
       const pools = [
         ...poolsFromContext(ctx),
@@ -536,6 +560,16 @@ export function startCronJobs() {
     }
   }
 
+  if (healthTimer) clearInterval(healthTimer);
+  if (config.health?.enabled !== false) {
+    healthTimer = setInterval(() => {
+      // Feeds go quiet over the weekend by design.
+      if (isWeekendMarketClosed()) return;
+      const alerts = collectHealthAlerts();
+      if (alerts.length) sendMessage(alerts.join("\n")).catch((e) => log("health_error", e.message));
+    }, 60_000);
+  }
+
   if (watcherTimer) clearInterval(watcherTimer);
   if (config.watcher?.enabled !== false) {
     watcherTimer = setInterval(() => {
@@ -557,6 +591,7 @@ const HELP = [
   "/stats — track record by setup type / session / side",
   "/memory — thesis history",
   "/calendar — high-impact USD events this week",
+  "/health — price feed, candles and LLM status",
   "/plan — today's plan (bias, POIs, triggers)",
   "/replan — rebuild today's plan now",
   "/mode scalp|day|swing — switch mode (saved to user-config.json)",
@@ -581,6 +616,8 @@ async function handleCommand(text, reply) {
     }
     case "/status":
       return reply(formatAgentStatus());
+    case "/health":
+      return reply(formatHealth());
     case "/setups":
       return reply(getSetupsSummary());
     case "/cancel": {

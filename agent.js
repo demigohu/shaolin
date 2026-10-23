@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { markOk, markFail } from "./health.js";
 import { jsonrepair } from "jsonrepair";
 import { buildSystemPrompt } from "./prompt.js";
 import { executeTool } from "./tools/executor.js";
@@ -49,14 +50,21 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, agentType 
     log("agent", `Step ${step + 1}/${maxSteps} [${agentType}]`);
 
     const toolChoice = step === 0 && agentType === "SCREENER" ? "required" : "auto";
-    const response = await getClient().chat.completions.create({
-      model: usedModel,
-      messages,
-      tools: getToolsForRole(agentType),
-      tool_choice: toolChoice,
-      temperature: config.llm.temperature,
-      max_tokens: config.llm.maxTokens,
-    });
+    let response;
+    try {
+      response = await getClient().chat.completions.create({
+        model: usedModel,
+        messages,
+        tools: getToolsForRole(agentType),
+        tool_choice: toolChoice,
+        temperature: config.llm.temperature,
+        max_tokens: config.llm.maxTokens,
+      });
+      markOk("llm");
+    } catch (error) {
+      markFail("llm", error);
+      throw error;
+    }
 
     const msg = response.choices?.[0]?.message;
     if (!msg) throw new Error(`LLM returned no choices: ${JSON.stringify(response).slice(0, 300)}`);

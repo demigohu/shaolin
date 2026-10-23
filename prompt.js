@@ -111,6 +111,7 @@ Session UTC: ${session} | AMD: ${getAMDPhase()}
 
 ${formatPerformanceStats(mode.id)}
 (Setup types with a clearly losing record are rejected by propose_setup.)
+(If the calibration shows you overconfident in a band, state a lower confidence for similar setups — confidence must mean the real win chance.)
 
 Thesis memory:
 ${getSetupMemorySummary()}

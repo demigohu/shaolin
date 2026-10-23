@@ -20,6 +20,7 @@ import { sessionDailies } from "../smc-analysis.js";
 import { tzOffsetHours } from "../smc-sessions.js";
 import { config } from "../config.js";
 import { log } from "../logger.js";
+import { markOk, markFail } from "../health.js";
 
 const TTL_MS = { "5m": 60_000, "15m": 120_000, "1h": 300_000, "1d": 900_000 };
 const RANGE = { "5m": "2d", "15m": "5d", "1h": "1mo", "1d": "1y" };
@@ -295,6 +296,17 @@ export async function getEntryCandles(spotPrice, key = "m5") {
  */
 export async function getSpotCandleSet(spotPrice, anchors = []) {
   if (spotPrice == null) return null;
+  try {
+    const set = await spotCandleSet(spotPrice, anchors);
+    markOk("candles");
+    return set;
+  } catch (error) {
+    markFail("candles", error);
+    throw error;
+  }
+}
+
+async function spotCandleSet(spotPrice, anchors) {
   if (process.env.TWELVEDATA_API_KEY) {
     try {
       return await twelveDataCandleSet(spotPrice);

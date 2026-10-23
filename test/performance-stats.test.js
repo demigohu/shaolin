@@ -47,3 +47,16 @@ test("too few trades or net positive → not blocked", () => {
   const bigWinner = [...Array.from({ length: 4 }, () => trade("bms_rto_ote", "asian", -10)), trade("bms_rto_ote", "asian", 100)];
   assert.equal(checkTrackRecord({ setup_type: "bms_rto_ote", session: "asian", mode: "scalp" }, bigWinner).ok, true);
 });
+
+test("confidence calibration compares stated confidence with realised win rate", async () => {
+  const { formatConfidenceCalibration, confidenceBucket } = await import("../performance-stats.js");
+  assert.equal(confidenceBucket(72), "70-74");
+  assert.equal(confidenceBucket(60), "<65");
+  assert.equal(confidenceBucket(90), "85+");
+  const t = (conf, pnl) => ({ confidence: conf, pnl_pips: pnl });
+  const trades = [t(72, 50), t(71, -30), t(70, -30), t(73, -30), t(74, -30), t(66, 10)];
+  const lines = formatConfidenceCalibration(trades, 5);
+  assert.equal(lines.length, 2);
+  assert.match(lines[1], /70-74: stated ~72%, won 20% \(n=5/);
+  assert.match(lines[1], /overconfident by 52/);
+});
